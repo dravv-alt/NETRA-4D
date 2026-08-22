@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NETRA-4D // Drishti AI Forensic Surveillance Engine</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+        <div class="brand">
+            <div class="pulse-indicator online"></div>
+            <div class="brand-text">
+                <span class="brand-title">NETRA-4D <span class="badge-tag">SOTA</span></span>
+                <span class="brand-sub">DRISHTI-4D FORENSIC SURVEILLANCE & BEHAVIOURAL INTEGRITY</span>
+            </div>
+        </div>
+
+        <div class="nav-metrics">
+            <div class="metric-pill">
+                <span class="m-label">MODEL</span>
+                <span class="m-val cyan" id="activeModelTag">YOLO26-Pose + SMPL-X</span>
+            </div>
+            <div class="metric-pill">
+                <span class="m-label">SYSTEM FPS</span>
+                <span class="m-val" id="systemFpsVal">78.5 FPS</span>
+            </div>
+            <div class="metric-pill">
+                <span class="m-label">ACTIVE TRACKS</span>
+                <span class="m-val green" id="activeTracksVal">12</span>
+            </div>
+            <div class="metric-pill">
+                <span class="m-label">REVIEW FLAGS</span>
+                <span class="m-val red" id="flaggedEventsVal">3</span>
+            </div>
+            <div class="metric-pill">
+                <span class="m-label">STORAGE</span>
+                <span class="m-val purple">G-Drive (Zero Disk)</span>
+            </div>
+        </div>
+
+        <div class="team-badge">
+            <span class="team-name">Digital Negatives (#39)</span>
+            <span class="author-tag">dravv-alt</span>
+        </div>
+    </header>
+
+    <!-- Main Dashboard Container -->
+    <main class="dashboard-grid">
+        <!-- Left / Center Column: Multi-Camera Wall & Viewport -->
+        <section class="main-viewport-section">
+            <!-- Camera Selector Strip (8 CCTV Channels) -->
+            <div class="camera-strip-container">
+                <div class="section-heading-sm">
+                    <span>📡 ACTIVE CCTV FEEDS (8 CHANNELS)</span>
+                    <span class="cam-count" id="cameraCountLabel">8 Cameras Calibrated</span>
+                </div>
+                <div class="camera-strip" id="cameraStrip">
+                    <!-- Dynamic Camera Cards -->
+                </div>
+            </div>
+
+            <!-- Main Interactive Viewport -->
+            <div class="viewport-card">
+                <div class="viewport-header">
+                    <div class="cam-info">
+                        <span class="live-dot"></span>
+                        <span class="cam-id-large" id="selectedCamTitle">VIDEO_03 — CCTV Mobile Usage</span>
+                        <span class="cam-meta" id="selectedCamMeta">1280x720 • 12.0 FPS • CBT_EXAM_LAB</span>
+                    </div>
+
+                    <!-- Overlay Layer Toggles -->
+                    <div class="overlay-toggles">
+                        <button class="toggle-btn active" id="toggleSeatPoly" onclick="toggleOverlay('seats')">🟩 Seats</button>
+                        <button class="toggle-btn active" id="toggleSkeleton" onclick="toggleOverlay('skeleton')">🟦 2D Skeletons</button>
+                        <button class="toggle-btn active" id="toggleSmplx" onclick="toggleOverlay('smplx')">🟪 3D SMPL-X</button>
+                        <button class="toggle-btn active" id="toggleGaze" onclick="toggleOverlay('gaze')">🟨 Gaze Rays</button>
+                        <button class="toggle-btn active" id="toggleLap" onclick="toggleOverlay('lap')">🟥 Lap/Objects</button>
+                    </div>
+                </div>
+
+                <!-- Canvas / Video Viewport -->
+                <div class="canvas-container" id="canvasContainer">
+                    <canvas id="forensicCanvas" width="1280" height="720"></canvas>
+                    
+                    <!-- HUD Overlays -->
+                    <div class="hud-overlay top-left" id="hudTopLeft">
+                        <div class="hud-item"><span class="hud-k">TARGET:</span> <span class="hud-v cyan" id="hudTarget">A02 ➔ LAP REGION</span></div>
+                        <div class="hud-item"><span class="hud-k">HEAD YAW:</span> <span class="hud-v" id="hudHeadYaw">-38.5° (DOWN/RIGHT)</span></div>
+                        <div class="hud-item"><span class="hud-k">TORSO TILT:</span> <span class="hud-v" id="hudTorso">12.1°</span></div>
+                        <div class="hud-item"><span class="hud-k">WRIST/LAP DIST:</span> <span class="hud-v red" id="hudWristDist">0.08 (PROXIMITY ALERT)</span></div>
+                    </div>
+
+                    <div class="hud-overlay top-right">
+                        <div class="risk-badge-large" id="hudRiskBadge">REVIEW REQUIRED</div>
+                        <div class="risk-score-large" id="hudRiskScore">RISK SCORE: 0.94</div>
+                    </div>
+                </div>
+
+                <!-- Interactive 4D Timeline Scrubber -->
+                <div class="timeline-container">
+                    <div class="timeline-controls">
+                        <button class="ctrl-btn" id="playPauseBtn" onclick="togglePlayback()">▶ PLAY</button>
+                        <button class="ctrl-btn" onclick="stepFrame(-1)">⏮ -1s</button>
+                        <button class="ctrl-btn" onclick="stepFrame(1)">⏭ +1s</button>
+                        <span class="time-display" id="timeDisplay">02:15.5 / 04:40.0</span>
+                    </div>
+
+                    <div class="timeline-track" id="timelineTrack" onclick="seekTimeline(event)">
+                        <!-- Progress Bar -->
+                        <div class="timeline-progress" id="timelineProgress"></div>
+                        <!-- Color Risk Bands -->
+                        <div class="risk-band review" style="left: 48%; width: 11%;" title="GT_PHONE_01: Mobile phone interaction in lap (A02)"></div>
+                        <div class="risk-band watch" style="left: 20%; width: 8%;" title="Suspicious Head Turn (A01)"></div>
+                        <div class="risk-band review" style="left: 75%; width: 14%;" title="Paper Interaction Candidate (Seat 12)"></div>
+                        <!-- Scrubber Handle -->
+                        <div class="scrubber-handle" id="scrubberHandle" style="left: 48%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Benchmark Comparison Section -->
+            <div class="benchmark-section">
+                <div class="section-heading">
+                    <span>🏆 TRIPLE-BRANCH SOTA BENCHMARK COMPARISON</span>
+                    <span class="sub-text">Evaluated against Drishti-4D Ground Truth Standard</span>
+                </div>
+                <div class="benchmark-grid" id="benchmarkGrid">
+                    <!-- Dynamic Benchmark Cards -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Column: Seat Heatmap & Forensic Event Review Stream -->
+        <aside class="sidebar-section">
+            <!-- Classroom Seat Risk Matrix -->
+            <div class="sidebar-card">
+                <div class="card-header">
+                    <span>🪑 SEAT RISK MATRIX</span>
+                    <span class="badge-mini" id="seatMatrixBadge">Live Spatial Grid</span>
+                </div>
+                <div class="seat-grid" id="seatGrid">
+                    <!-- Dynamic Seat Cells -->
+                </div>
+            </div>
+
+            <!-- Prioritized Forensic Review Queue -->
+            <div class="sidebar-card flex-1">
+                <div class="card-header">
+                    <span>🚨 FORENSIC INCIDENT QUEUE</span>
+                    <span class="badge-count" id="reviewCountBadge">3 Events</span>
+                </div>
+                <div class="incident-list" id="incidentList">
+                    <!-- Dynamic Event Cards -->
+                </div>
+            </div>
+
+            <!-- Export & Audit Actions -->
+            <div class="audit-actions-card">
+                <button class="action-btn primary" onclick="exportForensicReport()">📑 EXPORT FORENSIC REPORT (JSON/PDF)</button>
+                <button class="action-btn secondary" onclick="syncDriveCheckpoints()">💾 SYNC GDRIVE CHECKPOINTS</button>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Forensic Incident Detail Modal -->
+    <div class="modal-backdrop" id="eventModal" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">FORENSIC REVIEW: BENCH_PHONE_01 (Seat A02)</div>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content populated dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn danger" onclick="markIncident('CONFIRMED_RELEVANT')">⚠️ CONFIRM RELEVANT FOR PROCTOR</button>
+                <button class="action-btn secondary" onclick="markIncident('DISMISSED')">✔ DISMISS (FALSE ALERT)</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
