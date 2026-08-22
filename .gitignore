@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+
+# Jupyter
+.ipynb_checkpoints
+
+# Datasets & Weights
+*.pt
+*.pth
+*.onnx
+*.engine
+data/raw/
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.zip
+*.tar
+*.tar.gz
+
+# PyTest
+.pytest_cache/
+
+# VS Code / IDE
+.vscode/
+.idea/

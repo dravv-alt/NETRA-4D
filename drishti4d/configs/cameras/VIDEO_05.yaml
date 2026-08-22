@@ -1,0 +1,28 @@
+# Camera Profile for VIDEO_05 / Reception & Verification Desk
+camera_id: VIDEO_05
+
+resolution:
+  width: 1280
+  height: 720
+
+seats:
+  DESK_01:
+    polygon: [[0.20, 0.30], [0.50, 0.30], [0.50, 0.80], [0.20, 0.80]]
+    desk_region: [[0.22, 0.32], [0.48, 0.32], [0.48, 0.55], [0.22, 0.55]]
+  DESK_02:
+    polygon: [[0.55, 0.30], [0.85, 0.30], [0.85, 0.80], [0.55, 0.80]]
+    desk_region: [[0.57, 0.32], [0.83, 0.32], [0.83, 0.55], [0.57, 0.55]]
+
+neighbors:
+  DESK_01:
+    left: null
+    right: DESK_02
+  DESK_02:
+    left: DESK_01
+    right: null
+
+zones:
+  entrance: [[0.02, 0.10], [0.25, 0.10], [0.25, 0.90], [0.02, 0.90]]
+  verification_queue: [[0.20, 0.70], [0.90, 0.70], [0.90, 0.98], [0.20, 0.98]]
+
+blind_spots: []
