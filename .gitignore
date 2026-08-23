@@ -8,6 +8,12 @@ env/
 venv/
 ENV/
 .env
+.secrets/
+credentials.json
+client_secret*.json
+service-account*.json
+service_account*.json
+kaggle.json
 
 # Jupyter
 .ipynb_checkpoints
@@ -17,7 +23,11 @@ ENV/
 *.pth
 *.onnx
 *.engine
+*.npz
+*.pkl
 data/raw/
+models/weights/
+outputs/
 *.mp4
 *.avi
 *.mkv
@@ -28,6 +38,12 @@ data/raw/
 
 # PyTest
 .pytest_cache/
+pytest-cache-files-*/
+
+# Tool and build caches
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
 
 # VS Code / IDE
 .vscode/

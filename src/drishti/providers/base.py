@@ -1,20 +1,17 @@
-"""
-Base Perception Provider Interface for Drishti-4D.
-Every perception branch (YOLO26, RTMPose, Multi-HMR, ObjectDetector, Replay)
-implements this contract to emit standardized PersonObservation and ObjectObservation records.
-"""
+"""Common contract for model-backed perception providers."""
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+
 import numpy as np
-from ..schemas import PersonObservation, ObjectObservation
+
+from ..schemas import ObjectObservation, PersonObservation
 
 
 class PerceptionProvider(ABC):
     @abstractmethod
-    def start(self):
-        """Initialize models, weights, and GPU context."""
-        pass
+    def start(self) -> None:
+        """Load the real model and selected compute device."""
 
     @abstractmethod
     def process_frame(
@@ -23,12 +20,10 @@ class PerceptionProvider(ABC):
         timestamp_sec: float,
         frame_bgr: np.ndarray,
         camera_id: str = "CAM01",
-        video_id: str = "VIDEO_01"
+        video_id: str = "VIDEO_01",
     ) -> Tuple[List[PersonObservation], List[ObjectObservation]]:
-        """Processes a single BGR video frame and emits normalized observations."""
-        pass
+        """Execute a model on one BGR frame and return model-derived records."""
 
     @abstractmethod
-    def close(self):
-        """Release GPU memory and workers."""
-        pass
+    def close(self) -> None:
+        """Release model references and accelerator caches."""

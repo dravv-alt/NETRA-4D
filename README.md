@@ -1,177 +1,326 @@
-# 👁️ NETRA-4D: Drishti Forensic AI & 4D Spatio-Temporal Integrity Engine
-> **Team Name**: Digital Negatives (Team #39)  
-> **Hackathon**: Drishti AI Hackathon — D. J. Sanghvi College of Engineering (DJSCE)  
-> **Problem Statement #1**: Real-Time & Forensic Examination Malpractice Detection using Multi-Camera CCTV Video Feeds.
+# NETRA-4D
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg?style=for-the-badge&logo=pytorch)](https://pytorch.org/)
-[![YOLO26](https://img.shields.io/badge/Pose_Model-YOLO26--Pose_SOTA-00FFFF.svg?style=for-the-badge&logo=yolo)](https://github.com/ultralytics)
-[![Google Colab](https://img.shields.io/badge/Colab-GPU_Accelerated-F9AB00.svg?style=for-the-badge&logo=googlecolab)](https://colab.research.google.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+Privacy-aware examination-video evidence pipeline built around real computer-vision model inference. NETRA-4D generates auditable annotated videos, raw per-frame detections, high-confidence phone-review frames, and run manifests.
 
----
+The repository deliberately distinguishes **measured outputs** from planned or experimental capabilities. It does not create simulated boxes, synthetic SMPL-X joints, seeded incidents, fabricated benchmark scores, or inferred malpractice verdicts.
 
-## 📌 Executive Summary
+## What runs today
 
-**NETRA-4D** is an autonomous, multi-camera 4D spatio-temporal forensic surveillance and exam integrity platform. Traditional CCTV surveillance relies on human proctors or brittle 2D frame-level heuristics that suffer from extreme false positives and blind spots. 
+- Official Ultralytics `yolo26n-pose.pt`: person boxes and 17 COCO keypoints.
+- Official Ultralytics `yolo26n.pt`: raw COCO object detections for new runs.
+- ByteTrack candidate IDs when tracking is enabled; otherwise IDs are visibly marked as frame-local.
+- Low-confidence phone proposals from candidate crops and optional overlapping tiles, wrist/person association, IoU deduplication, and temporal confirmation.
+- A bounded live webcam/RTSP runner that drops stale frames and records FPS, latency, a privacy-safe stream, event keyframes, and clips.
+- A stable SQLite/FastAPI event and human-review backend with REST, WebSocket updates, media serving, and candidate timelines.
+- A workstation-relative CBT Peak reasoner with candidate baselines, own/neighbor monitor semantics, normal-device counter-evidence, four sequence behaviours, uncertainty routing, and cross-candidate graph state.
+- A one-to-one candidate/device binding: tracked candidate `N` is mapped to the assigned workstation screen as `PC-N`, with current detector or scene-map provenance and association confidence.
+- Privacy overlay sequence: pose keypoints -> 2-D gaze proxy -> face/head blur -> candidate/gaze annotation. `GAZE PROXY` is head-direction from eye/nose geometry, not eye/iris tracking.
+- Five user-supplied Google Drive videos, materialized one at a time for real decoding and then removed from temporary staging.
+- One output directory per source video, with an annotated MP4, JSONL evidence, hashes, summary, and completion marker.
 
-NETRA-4D solves this by fusing **YOLO26-Pose End-to-End Keypoint Estimation**, **Multi-Camera Spatial Zone Modeling**, and **Temporal Evidence Reasoning** to detect and forensically verify candidate malpractice in real time with verifiable evidence chains.
+## Honest limitations
 
-```
-                  ┌────────────────────────────────────────────────────────┐
-                  │          NETRA-4D ARCHITECTURAL PIPELINE               │
-                  └────────────────────────────────────────────────────────┘
-                                            │
-  [ CCTV Video Streams ] ────────► [ Direct Zero-Copy GDrive Mount ]
-  (CAM01 - VIDEO_08)                        │
-                                            ▼
-                           [ Stage 1: YOLO26-Pose SOTA ]
-                           • 17-Keypoint Estimation (NMS-Free)
-                           • Spatial Seat-Lock & Track Association
-                                            │
-                                            ▼
-                      [ Stage 2: 4D Spatio-Temporal Evidence Engine ]
-                      • Lap Proximity & Downward Glance Vectors
-                      • Partition Boundary Crossing (Hands/Arms)
-                      • Mutual Orientation & Torso Rotation Tracking
-                                            │
-                                            ▼
-                        [ Stage 3: Forensic Risk State Machine ]
-                        • NORMAL (Safe) ➔ WATCH (Anomaly) ➔ REVIEW (Confirmed)
-                        • Counter-Evidence Weighting & Calibration
-                                            │
-                                            ▼
-                  [ Persistent Checkpoints & Forensic Reports (GDrive) ]
-                  • JSON Timeline Artifacts • Highlight Video Clips • Benchmark Metrics
-```
+- A detected `cell phone` is evidence for review, not proof of phone usage, cheating, or other misconduct.
+- No accuracy, precision, recall, or F1 is claimed because reviewed ground-truth labels are not currently available.
+- Multi-HMR/SMPL-X integration code is available, but there is no completed 3-D run yet. It requires a compatible CUDA/Python environment and the official Multi-HMR checkpoint.
+- A complete privacy + YOLO26 five-video CUDA run is verified locally from downloaded Kaggle output. Kaggle allocated a Tesla P100 for that completed job, not the requested T4; the recorded runtime metadata is preserved rather than relabelled. Never use a folder containing `INCOMPLETE.txt` as result evidence.
+- Pairwise interaction and gaze-to-neighbour-screen proposals are implemented as explicitly labelled temporal proxies, not learned cheating verdicts.
+- The real chit detector adapter, labeling tool, and strict training runner are implemented, but no trained chit checkpoint is claimed: the merged repository contains no genuine chit labels or checkpoint. Low-hand events remain proxies until humans label real frames and train/validate the custom model.
 
----
-
-## 🏆 Key Innovations & Architectural Edge
-
-### 1. YOLO26-Pose vs Legacy YOLOv8 / YOLOv11
-NETRA-4D integrates **YOLO26-Pose**, leveraging an **End-to-End NMS-Free architecture** specifically optimized for high-density, occluded classroom environments:
-
-| Metric / Capability | YOLOv8-Pose | YOLOv11-Pose | 🏆 **YOLO26-Pose (NETRA-4D)** |
-| :--- | :--- | :--- | :--- |
-| **Inference Throughput** | ~45 FPS | ~62 FPS | **~78 FPS (SOTA Speed)** |
-| **Duplicate Keypoint Suppression** | Standard NMS | Optimized NMS | **NMS-Free End-to-End** |
-| **Wrist / Head OKS AP (Distance)** | 68.2% | 74.1% | **81.5% (High Precision)** |
-| **Occlusion Resistance** | Moderate | Good | **Superior (Multi-View Calibration)** |
-
-### 2. Zero-Copy Symlink Cloud Ingestion
-Instead of wasting hours and gigabytes downloading raw datasets locally:
-- Directly connects via **Google Drive Symbolic Mounts** (`/content/drive/MyDrive/NETRA-4D`).
-- **0 MB Local Storage Overhead** on host machine.
-- High-throughput direct streaming into PyTorch and OpenCV.
-
-### 3. Fault-Tolerant Persistent Checkpointing
-Every intermediate stage is auto-serialized to Google Drive:
-- **`checkpoints/`**: Per-video stage checkpoints (`stage1_poses.json`, `stage2_signals.json`, `stage3_events.json`).
-- **Instant Resume**: If a Colab session disconnects, the system automatically loads saved stages and resumes execution without re-running earlier steps.
-- **`logs/`**: Complete telemetry and timestamped audit logs.
-
----
-
-## 🎯 Malpractice Taxonomy & Behavioral Evidence
-
-NETRA-4D detects and categorizes malpractice using the **Drishti-4D Forensic Benchmark Standard**:
-
-### 1. 📱 Cheating via Mobile Phone (`CHEATING_VIA_PHONE`)
-- **Signal Indicators**:
-  - Continuous wrist/hand positioning in lap/under-desk zone (`LAP_REGION_ASSOCIATION`).
-  - Repeated downward gaze vector (< -35°) synchronized with hand stillness.
-  - Prohibited object detection correlation in lap region.
-- **Risk State**: Escalates to `REVIEW` with timestamped forensic evidence.
-
-### 2. 📝 Cheating via Paper Chits (`CHEATING_VIA_CHITS`)
-- **Signal Indicators**:
-  - Hand trajectory crossing defined workstation partition boundary (`DESK_REGION_CROSSING`).
-  - Rapid lateral hand extension toward adjacent candidate seat.
-  - Object transfer interaction candidate.
-
-### 3. 🗣️ Non-Verbal & Verbal Collusion (`CHEATING_VIA_COMMUNICATION`)
-- **Signal Indicators**:
-  - Torso rotation angle > 45° toward neighbor seat (`TORSO_ROTATION_TOWARD_NEIGHBOUR`).
-  - Sustained excessive head turn (> 1.5 seconds) toward adjacent candidate.
-  - Reciprocal mutual orientation episodes between adjacent tracks.
-
----
-
-## 📂 Repository Structure
+## Pipeline
 
 ```text
-NETRA-4D/
-├── drishti4d/
-│   ├── configs/
-│   │   ├── baseline.yaml             # Baseline engineering thresholds & weights
-│   │   └── cameras/                  # Multi-camera profiles & seat polygon mappings
-│   │       ├── CAM01.yaml
-│   │       ├── VIDEO_01.yaml ... VIDEO_08.yaml
-│   ├── data/
-│   │   ├── annotations/              # Ground truth forensic benchmark annotations
-│   │   │   └── ground_truth_benchmark.json
-│   │   └── contact_sheets/           # Forensic evidence contact sheets
-│   └── artifacts/
-│       └── hard_negatives/           # Calibrated false-positive suppression datasets
-├── main.ipynb                        # Complete Colab GPU Execution Pipeline
-├── README.md                         # Documentation & System Architecture
-└── requirements.txt                  # Python dependencies
+Google Drive video (one at a time)
+        v
+Decoded source frames + source hash/provenance
+        v
+YOLO26 pose -----------> people + COCO keypoints + candidate tracking
+YOLO26 object detection -> raw object boxes/classes/confidence
+        v
+Gaze proxy -> face/head blur -> post-blur candidate annotation
+        v
+Annotated MP4 + detections.jsonl + phone-review stills + COMPLETE.json
+        v
+Kaggle kernel output / private Kaggle dataset / optional Google Drive upload
 ```
 
----
+The runner writes phone-review stills only for the exact raw COCO class `cell phone` at confidence >= `0.70`. Those stills remain inside their own `VIDEO_XX/phone_detection_frames/` directory.
 
-## 🚀 Quickstart & Colab Execution
+## Repository map
 
-### Running via Google Colab (Recommended)
-
-1. Open **`main.ipynb`** in VS Code / Antigravity IDE (or upload directly to [Google Colab](https://colab.research.google.com/)).
-2. Connect to a **GPU Runtime** (T4 / A100 / L4).
-3. Run the notebook cells sequentially:
-   - **Step 1**: GPU & CUDA Verification.
-   - **Step 2**: Mount Google Drive (`/content/drive`).
-   - **Step 3**: Zero-Copy Symlink Mount of Video Datasets.
-   - **Step 4**: YOLO26-Pose Model Initialization.
-   - **Step 5**: Batch Spatio-Temporal Inference & Auto-Checkpointing.
-   - **Step 6**: Forensic Event Scoring & Comparative Evaluation.
-
-### Local Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/DrishtiAI-DJSCE/DI1_39_DigitalNegatives.git
-cd DI1_39_DigitalNegatives
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+```text
+ARCHITECTURE.md                         end-to-end components and data flow
+drishti4d/configs/datasets.json       five supplied Drive assets
+models/weights/                       official YOLO weights (ignored by Git)
+models_smplx_v1_1.zip                 supplied SMPL-X archive (870 MB)
+src/drishti/providers/                real YOLO providers
+src/drishti/privacy.py                privacy/gaze-proxy layer
+scripts/render_annotated_videos.py    full per-frame video renderer
+scripts/run_live_webcam.py            bounded real-time inference and evidence runner
+scripts/review_events.py              human-only event review workflow
+scripts/analyze_reviewed_events.py    reviewed threshold calibration report
+scripts/label_chit_examples.py        human YOLO chit annotation over Drive videos
+scripts/train_chit_detector.py        strict real custom detector training
+scripts/import_review_events.py       deterministic SQLite review-queue import
+scripts/calibrate_cbt_workstations.py real-frame human workstation calibration
+scripts/auto_calibrate_from_evidence.py automatic map from verified real detections
+scripts/preview_workstation_map.py     calibration review image from a real frame
+src/drishti/cbt/                      primary workstation-relative reasoner
+scripts/annotate_baseline_events.py   fast temporal replay over verified evidence
+scripts/run_kaggle_gpu_pipeline.py    submit -> wait -> download -> validate -> publish
+scripts/benchmark_detectors.py        same-frame YOLO11n vs YOLO26n comparison
+scripts/run_multihmr_smplx.py         strict official Multi-HMR runner
+scripts/upload_outputs_to_gdrive.py   resumable Drive uploader
+scripts/compress_output_videos.py     verified CRF transcoding without implicit deletion
+docs/PIPELINE_AND_WORKING_STATUS.md   detailed audit/status document
+tests/                                deterministic unit tests only
 ```
 
----
+## Setup
 
-## 📊 Forensic Benchmark Evaluation
+```powershell
+python -m pip install -r requirements.txt
+python scripts/fetch_official_yolo_weights.py
+python -m pytest tests -q -p no:cacheprovider
+```
 
-NETRA-4D is rigorously calibrated against the **Drishti-4D Ground Truth Benchmark**:
+The first command that uses a missing official YOLO weight downloads it from Ultralytics. Model files and credentials are ignored by Git.
 
-| Benchmark ID | Category | Target Seat | Time Window | Expected State | Validation Result |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `BENCH_PHONE_01` | Cheating via Phone | `A02` | `135.0s - 165.0s` | `REVIEW` | ✅ **VERIFIED (Score: 0.94)** |
-| `BENCH_CHIT_01` | Cheating via Chits | `SEAT_12` | `22.0s - 50.0s` | `REVIEW` | ✅ **VERIFIED (Score: 0.91)** |
-| `BENCH_TALKING_01` | Candidate Collusion | `S01 ➔ S02` | `28.0s - 65.0s` | `REVIEW` | ✅ **VERIFIED (Score: 0.89)** |
+## Run the complete annotated-video pipeline
 
----
+Use a T4-or-newer GPU runtime for the full run:
 
-## 👥 Team Digital Negatives (Team #39)
+```powershell
+python scripts/render_annotated_videos.py `
+  --device cuda:0 `
+  --require-cuda `
+  --tracker bytetrack.yaml `
+  --phone-confidence 0.70 `
+  --run-id privacy_yolo26_t4_v1
+```
 
-Developed for the **Drishti AI Hackathon at D. J. Sanghvi College of Engineering (DJSCE)**.
+## Live webcam/RTSP pipeline
 
-- **Author**: `dravv-alt` ([@dravv-alt](https://github.com/dravv-alt))
-- **Email**: [jaindravvya19@gmail.com](mailto:jaindravvya19@gmail.com)
-- **Domain**: Computer Vision, 4D Spatio-Temporal Modeling, Surveillance Forensics.
-- **Repository**: [DrishtiAI-DJSCE/DI1_39_DigitalNegatives](https://github.com/DrishtiAI-DJSCE/DI1_39_DigitalNegatives.git)
+For the integrated demo, start MediaMTX (when installed), the FastAPI backend,
+and the React frontend together:
 
----
-*NETRA-4D — Transforming Campus Integrity with Cutting-Edge AI Forensics.*
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_live_demo.ps1
+```
+
+Open `http://127.0.0.1:5173`. The monitor provides three real source paths:
+
+- **Start Webcam** runs camera `0` through the backend and renders annotated MJPEG immediately.
+- **Upload & Stream** processes the selected video losslessly, frame by frame, while annotated frames, telemetry, events, keyframes, and clips arrive in the UI.
+- Enter an `rtsp://` URL and press Enter to process a MediaMTX/network stream.
+
+The same page preloads three integrity-validated **Previous Sampled Runs** from
+`OUTPUT/netra4d_final_20260823`. Each card plays the real annotated MP4 and
+shows measured frame/person/object/event counts, downloadable JSONL evidence,
+high-confidence snapshots, and the original source reference. VIDEO_01-03 also
+have hash-verified, browser-compatible unannotated previews in
+`OUTPUT/showcase_inputs`, selectable with the **Source Input / Annotated Output**
+toggle. If a live/upload
+session fails or does not publish its first frame within ten seconds, the player
+automatically switches to the selected verified output instead of going blank.
+
+MediaMTX accepts RTSP publishers at `rtsp://127.0.0.1:8554/<path>` and exposes
+its local control API on port `9997`. For example, an installed FFmpeg can
+publish a dataset video with:
+
+```powershell
+ffmpeg -re -i input.mp4 -c copy -f rtsp rtsp://127.0.0.1:8554/exam
+```
+
+Uploaded files use decoder back-pressure: every source frame is processed and
+timestamps are derived from its frame index and FPS. Webcam/RTSP sources instead
+discard stale queued frames when inference falls behind so the displayed feed
+remains live. Per-frame state is atomically published under
+`OUTPUT/live_sessions/<session-id>/`; durable video, metrics, JSON evidence,
+snapshots, and clips are written under `OUTPUT/live_runs/<run-id>/`.
+
+```powershell
+python scripts/run_live_webcam.py `
+  --source 0 `
+  --device cuda:0 `
+  --require-cuda `
+  --record-stream
+```
+
+CBT Peak automatically warms up a workstation map from real person/monitor
+observations by default. Drawing boxes is not required. A human-reviewed map is
+an optional override:
+
+```powershell
+python scripts/calibrate_cbt_workstations.py --asset VIDEO_03 `
+  --camera-id CAMERA_04 --calibrated-by <reviewer>
+python scripts/run_live_webcam.py --source 0 --device cuda:0 --require-cuda `
+  --workstation-map drishti4d/configs/workstations/VIDEO_03.yaml `
+  --workstation-mode human --require-workstation-map
+```
+
+See [CBT Peak Engine](docs/CBT_PEAK_ENGINE.md). Automatic maps are labelled
+`AUTOMATIC`; human maps are explicit overrides. No fixed workstation polygons
+are assumed or copied between cameras.
+
+The live-source queue capacity is two frames. Each run writes `metrics.json`,
+`live_annotated.mp4`, and per-event keyframes/clips under
+`outputs/live_runs/<run-id>/`.
+
+## Review and tune the 128 baseline events
+
+The verified replay is loaded into `outputs/netra4d_events.sqlite` as 128
+`PENDING` records: 78 low-hand proxies, 45 other-screen proxies, and 5
+interaction proxies. No true/false decision is fabricated.
+
+```powershell
+python scripts/review_events.py --reviewer <your-name>
+python scripts/analyze_reviewed_events.py
+python -m uvicorn drishti.api.app:app --app-dir src --host 127.0.0.1 --port 8000
+```
+
+The analyzer remains `ready: false` until a human marks events `CONFIRMED` or
+`FALSE_POSITIVE`. See [the stable event contract](docs/EVENT_CONTRACT.md).
+
+## Real chit/paper dataset and detector
+
+```powershell
+python scripts/label_chit_examples.py --asset VIDEO_01
+python scripts/train_chit_detector.py datasets/chit_reviewed/dataset.yaml --device cuda:0
+```
+
+Only explicitly human-boxed examples or explicitly marked negatives are saved.
+The full renderer accepts the resulting checkpoint through `--chit-model`.
+
+Every successful run has this structure:
+
+```text
+outputs/full_video_runs/<run-id>/
+  run.json
+  VIDEO_01/ ... VIDEO_05/
+    VIDEO_XX_annotated.mp4
+    detections.jsonl
+    phone_detection_frames/       # only when qualifying detections exist
+    summary.json
+    COMPLETE.json
+```
+
+`COMPLETE.json` is the upload gate. `INCOMPLETE.txt` means the run failed or was interrupted and must not be published as evidence.
+
+## Kaggle GPU: repeatable full-run lifecycle
+
+The orchestration script uses the local `kaggle.json` only through environment variables; it never prints, commits, or submits the key. It submits a private CUDA-required kernel, waits for completion, downloads actual output, validates all five completion markers, then creates/versions the private results dataset.
+
+```powershell
+python scripts/run_kaggle_gpu_pipeline.py `
+  --run-id kaggle_gpu_privacy_yolo26_t4_v1
+```
+
+Kaggle may allocate a different GPU than the UI selection. Always use the device recorded in `run.json`; the existing completed run records a Tesla P100. The entrypoint rejects unavailable CUDA and never silently falls back to CPU.
+
+To compare two validated complete runs:
+
+```powershell
+python scripts/compare_verified_runs.py `
+  outputs/full_video_runs/<baseline-run> `
+  outputs/kaggle_gpu_downloads/<new-run>/<new-run> `
+  --output outputs/run_comparisons/<new-run>.json
+```
+
+## Measured YOLO benchmark
+
+Run both object models on identical real frames:
+
+```powershell
+python scripts/benchmark_detectors.py `
+  --asset VIDEO_02 `
+  --max-frames 50 `
+  --sample-every 10 `
+  --warmup-frames 1 `
+  --device cuda:0 `
+  --require-cuda
+```
+
+The current bounded CPU evidence run used five VIDEO_02 frames (0, 100, 200, 300, 400), excluding one warm-up frame per model:
+
+| Model | Mean inference | Raw detections | Raw phone detections |
+|---|---:|---:|---:|
+| YOLO11n | 44.91 ms | 27 | 0 |
+| YOLO26n | 44.72 ms | 27 | 0 |
+
+See [the full benchmark evidence](outputs/benchmarks/video02_yolo11_vs_yolo26_cpu_warm.json). This is a runtime/count comparison, not an accuracy benchmark.
+
+## Multi-HMR and SMPL-X
+
+The supplied `models_smplx_v1_1.zip` contains real SMPL-X assets. Verify the archive without extracting it:
+
+```powershell
+python scripts/prepare_smplx_assets.py --verify-only
+```
+
+For actual 3-D reconstruction, create a compatible CUDA/Python environment for the official Multi-HMR dependency set, then use the pinned bootstrap and runner. The runner samples real frames from a Drive asset, supplies `SMPLX_NEUTRAL.npz`, invokes the official `demo.py`, and stores provenance.
+
+```powershell
+python scripts/bootstrap_multihmr_repo.py
+python scripts/run_multihmr_smplx.py `
+  --repo third_party/multi-hmr `
+  --asset VIDEO_02 `
+  --require-cuda
+```
+
+This 3-D stage is intentionally separate from the privacy-safe annotated video until it is executed and validated on the target T4 runtime.
+
+## Upload a verified run to Google Drive
+
+The uploader preserves the per-video directory layout, uses resumable uploads, and writes a receipt with returned Google Drive file IDs. Target folder: `1vEfaikd1G9_dDr0-fbDm01w20Mk0TI18`.
+
+```powershell
+python scripts/upload_outputs_to_gdrive.py `
+  outputs/full_video_runs/<run-id> `
+  --auth oauth `
+  --root-name NETRA-4D-<run-id>
+```
+
+For Colab, use `--auth colab`. An upload is verified only when a receipt appears under `outputs/upload_receipts/`.
+
+## Compress completed videos
+
+AV1 CRF 28 is the archival default. It preserves the original resolution and
+usually saves substantial space, but AV1 encoding is CPU-bound on Tesla T4 and
+P100 GPUs. The command writes a second file and verifies resolution, duration,
+video readability, and size reduction before producing a receipt:
+
+```powershell
+python scripts/compress_output_videos.py `
+  outputs/kaggle_gpu_downloads/yolo26n_full_t4_v1/netra4d_outputs/yolo26n_full_t4_v1 `
+  --codec av1 --crf 28 --preset 8 --limit 1
+```
+
+After visually checking the one-video trial, omit `--limit` for all five. Add
+`--delete-source-after-verify` only when the verified originals should actually
+be removed. HEVC (`--codec h265 --crf 24 --preset medium`) is faster and more
+widely practical; H.264 is the most compatible.
+
+## Current evidence
+
+The current retained evidence is the complete Kaggle CUDA run at `outputs/kaggle_gpu_downloads/yolo26n_full_t4_v1/netra4d_outputs/yolo26n_full_t4_v1`:
+
+- 5 videos and 15,346 timeline frames, each in its own `VIDEO_XX` directory.
+- YOLO26n object detection, YOLO26n pose, ByteTrack IDs, privacy masks, and gaze-proxy overlays.
+- All five directories contain `COMPLETE.json` and an annotated MP4.
+- 0 detections met the exact `cell phone >= 0.70` evidence gate, so 0 phone-review stills were written.
+- Runtime metadata records CUDA on `Tesla P100-PCIE-16GB`; it is not represented as a T4 result.
+
+The CPU-light temporal baseline can be added without rerunning YOLO:
+
+```powershell
+python scripts/annotate_baseline_events.py `
+  outputs/kaggle_gpu_downloads/yolo26n_full_t4_v1/netra4d_outputs/yolo26n_full_t4_v1 `
+  --run-id baseline_events_full_v1
+```
+
+The verified local replay processed all 15,346 frames and emitted 128 review
+events. Labels explicitly distinguish phone model evidence from low-hand,
+candidate-interaction, and other-screen behavioral proxies.
+
+Read [PIPELINE_AND_WORKING_STATUS.md](docs/PIPELINE_AND_WORKING_STATUS.md) for file hashes, known limitations, previous Kaggle publication status, and the experimental DigitalNegatives Watcher merge.

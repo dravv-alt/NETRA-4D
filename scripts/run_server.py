@@ -1,34 +1,14 @@
-"""
-Drishti-4D Server Runner.
-Starts the FastAPI server and hosts the Frontend Forensic Dashboard.
-"""
+"""Serve the read-only verified-run API and dashboard on localhost."""
+
+from pathlib import Path
+import sys
 
 import uvicorn
-import os
-import sys
-from pathlib import Path
 
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
 
-# Add src to pythonpath
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
 
-def main():
-    print("=" * 80)
-    print("[*] STARTING DRISHTI-4D / NETRA-4D FORENSIC SURVEILLANCE SERVER")
-    print("=" * 80)
-    print("    Dashboard UI: http://localhost:8000")
-    print("    Swagger Docs: http://localhost:8000/docs")
-    print("=" * 80)
-
-    uvicorn.run(
-        "drishti.api.app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run("drishti.api.app:app", host="127.0.0.1", port=8000, log_level="info")

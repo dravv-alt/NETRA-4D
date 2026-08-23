@@ -1,14 +1,10 @@
 """Unit tests for Drishti-4D Pydantic schemas."""
 
-import pytest
 from drishti.schemas import (
     PersonObservation,
     ObjectObservation,
     Keypoint,
-    RiskStateEnum,
-    BehaviourEnum,
     ObjectClassEnum,
-    BenchmarkMetrics
 )
 
 def test_person_observation_creation():
