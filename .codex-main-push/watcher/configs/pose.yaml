@@ -1,0 +1,61 @@
+# Watcher Pose Estimation Configuration
+# Phase 4: Pose Estimation and Keypoint Stability
+
+pose:
+  # Model configuration
+  model: "yolov8n-pose.pt"
+  
+  # Detection thresholds
+  confidence_threshold: 0.01
+  iou_threshold: 0.45
+  
+  # Device: "cpu", "cuda", "mps", or "auto"
+  device: "auto"
+  
+  # Image size for inference - 1280 catches small/seated candidates
+  imgsz: 1280
+  
+  # Half precision (FP16)
+  half: false
+
+# Keypoint configuration (COCO 17-keypoint format)
+keypoints:
+  indices:
+    nose: 0
+    left_eye: 1
+    right_eye: 2
+    left_ear: 3
+    right_ear: 4
+    left_shoulder: 5
+    right_shoulder: 6
+    left_elbow: 7
+    right_elbow: 8
+    left_wrist: 9
+    right_wrist: 10
+    left_hip: 11
+    right_hip: 12
+    left_knee: 13
+    right_knee: 14
+    left_ankle: 15
+    right_ankle: 16
+  
+  # Confidence threshold for individual keypoints
+  keypoint_conf_threshold: 0.02
+  
+  # Upper body keypoints (used for head orientation and hand features)
+  upper_body_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# Smoothing configuration
+smoothing:
+  method: "ema"
+  ema_alpha: 0.3
+  one_euro:
+    min_cutoff: 1.0
+    beta: 0.0
+    d_cutoff: 1.0
+
+# Confidence gating
+confidence_gating:
+  min_pose_confidence: 0.02
+  min_valid_keypoints: 2
+  downweight_low_confidence: false

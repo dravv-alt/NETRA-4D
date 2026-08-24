@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { TriagedAIEvent } from '../../types';
 import { StatusBadge } from '../ui/StatusBadge';
 import { ConfidenceBar } from '../ui/ConfidenceBar';
-import { Filter, Search, ArrowRight, Clock, CheckCircle2, Sparkles, Inbox } from 'lucide-react';
+import { Filter, Search, ArrowRight, Clock, CheckCircle2, Sparkles, Inbox, RotateCcw } from 'lucide-react';
 import { playHapticSound } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { ParallaxCard } from '../ui/parallax-card';
@@ -18,11 +18,18 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
 }) => {
   const [selectedSeverity, setSelectedSeverity] = useState<string>('ALL');
   const [selectedBehavior, setSelectedBehavior] = useState<string>('ALL');
+  const [selectedDecision, setSelectedDecision] = useState<string>('PENDING');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'priority' | 'newest' | 'confidence' | 'persistence'>('priority');
 
-  // Filter Logic
+  const pendingEvents = events.filter((event) => !event.humanDecision || event.humanDecision.status === 'pending');
+  const behaviorOptions = Array.from(new Set(events.map((event) => event.behavior))).sort();
+
+  // Filter Logic: default to evidence still awaiting an invigilator decision.
   const filteredEvents = events.filter((ev) => {
+    const isPending = !ev.humanDecision || ev.humanDecision.status === 'pending';
+    if (selectedDecision === 'PENDING' && !isPending) return false;
+    if (selectedDecision === 'DECIDED' && isPending) return false;
     if (selectedSeverity !== 'ALL' && ev.severity !== selectedSeverity) return false;
     if (selectedBehavior !== 'ALL' && ev.behavior !== selectedBehavior) return false;
     if (searchQuery) {
@@ -39,16 +46,17 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
   const sortedEvents = [...filteredEvents].sort((a, b) => {
     if (sortBy === 'confidence') return b.aiConfidence - a.aiConfidence;
     if (sortBy === 'persistence') return b.persistenceSec - a.persistenceSec;
-    if (sortBy === 'newest') return b.timestamp.localeCompare(a.timestamp);
+    if (sortBy === 'newest') return b.videoTimestampSec - a.videoTimestampSec;
     const scoreMap = { escalated: 3, review: 2, observe: 1 };
     return (scoreMap[b.severity] || 0) - (scoreMap[a.severity] || 0);
   });
 
-  const needsReviewCount = events.filter((e) => e.severity === 'review').length;
-  const escalatedCount = events.filter((e) => e.severity === 'escalated').length;
+  const needsReviewCount = pendingEvents.length;
+  const escalatedCount = pendingEvents.filter((e) => e.severity === 'escalated').length;
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
+      <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs sm:p-7">
       {/* Header Banner */}
       <div className="flex items-center justify-between pb-4 border-b border-neutral-200 flex-wrap gap-4">
         <div>
@@ -58,7 +66,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
             </div>
             <span>AI Anomaly Triage & Investigation Queue</span>
             <span className="text-xs px-3 py-1 rounded-full bg-neutral-900 text-white font-bold">
-              {needsReviewCount} Needs Review
+              {needsReviewCount} Pending Review
             </span>
             {escalatedCount > 0 && (
               <span className="text-xs px-3 py-1 rounded-full bg-rose-700 text-white font-bold">
@@ -99,11 +107,20 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
             <Search size={16} className="absolute left-4 top-3.5 text-neutral-400" />
             <input
               type="text"
-              placeholder="Search seat, candidate ID..."
+              placeholder="Search candidate, workstation, event..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-white border border-neutral-300 rounded-2xl pl-11 pr-4 py-3 text-xs text-neutral-900 placeholder-neutral-400 font-sans focus:outline-none focus:border-neutral-900 shadow-2xs"
             />
+          </div>
+
+          <div className="bg-white p-6 space-y-3 rounded-3xl border border-neutral-200 shadow-xs">
+            <div className="text-xs uppercase text-neutral-500 font-bold tracking-wider">Decision State</div>
+            {[{ id: 'PENDING', label: 'Awaiting Invigilator', count: pendingEvents.length }, { id: 'DECIDED', label: 'Already Decided', count: events.length - pendingEvents.length }, { id: 'ALL', label: 'All Evidence', count: events.length }].map((item) => (
+              <button key={item.id} onClick={() => setSelectedDecision(item.id)} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-xs transition-all cursor-pointer font-medium ${selectedDecision === item.id ? 'bg-neutral-900 text-white font-bold' : 'text-neutral-600 hover:bg-neutral-100'}`}>
+                <span>{item.label}</span><span className={selectedDecision === item.id ? 'text-neutral-300' : 'text-neutral-400'}>({item.count})</span>
+              </button>
+            ))}
           </div>
 
           {/* Severity Filter */}
@@ -149,9 +166,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
             <div className="space-y-1.5">
               {[
                 { id: 'ALL', label: 'All Patterns' },
-                { id: 'possible_object_interaction', label: 'Object / Phone Interaction' },
-                { id: 'repeated_sideward_attention', label: 'Sideward Glance / Yaw' },
-                { id: 'peer_interaction', label: 'Peer Interaction' },
+                ...behaviorOptions.map((behavior) => ({ id: behavior, label: behavior.replaceAll('_', ' ') })),
               ].map((item) => {
                 const isSelected = selectedBehavior === item.id;
                 return (
@@ -174,6 +189,10 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
             </div>
           </div>
 
+          <button onClick={() => { setSelectedSeverity('ALL'); setSelectedBehavior('ALL'); setSelectedDecision('PENDING'); setSearchQuery(''); }} className="w-full flex items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-xs font-semibold text-neutral-600 hover:bg-neutral-50">
+            <RotateCcw size={13} /> Reset queue filters
+          </button>
+
           {/* Explainer Box */}
           <div className="bg-neutral-50 p-6 rounded-3xl space-y-2 text-xs text-neutral-600 border border-neutral-200 shadow-2xs">
             <div className="font-bold text-neutral-950 uppercase text-xs flex items-center gap-2">
@@ -190,7 +209,11 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
         </div>
 
         {/* Right 8.5 Cols: Event Cards */}
-        <div className="col-span-12 lg:col-span-8 space-y-5">
+        <div className="col-span-12 lg:col-span-8 min-w-0">
+          <div
+            className="max-h-[calc(100vh-15rem)] overflow-y-auto overscroll-contain space-y-5 pr-2 scrollbar-thin scrollbar-thumb-neutral-300 scrollbar-track-transparent"
+            aria-label="Scrollable investigation event list"
+          >
           {sortedEvents.length === 0 ? (
             <div className="p-16 text-center bg-white rounded-3xl border border-neutral-200 text-neutral-500">
               No AI events match the selected triage filter criteria.
@@ -226,7 +249,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
                       <span className="text-neutral-500 font-semibold">(Candidate #{event.candidateId})</span>
                       <span className="text-neutral-300">•</span>
                       <span className="text-neutral-500 flex items-center gap-1.5 text-xs">
-                        <Clock size={13} /> {event.timestamp} ({event.cameraName})
+                        <Clock size={13} /> Source {event.videoTimestampSec.toFixed(3)}s · {event.timestamp} ({event.cameraName})
                       </span>
                     </div>
 
@@ -250,7 +273,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
 
                       {/* Evidence Stack Chips */}
                       <div className="space-y-2">
-                        {event.evidenceStack.slice(0, 3).map((item) => (
+                        {(event.evidenceStack.length ? event.evidenceStack.slice(0, 3) : [{ id: `${event.id}-no-signal`, stepNumber: '--', title: 'No additional signal', description: 'Open the evidence record for the raw event payload.', confidence: event.aiConfidence }]).map((item) => (
                           <div key={item.id} className="flex items-center justify-between text-xs bg-neutral-50 px-4 py-2.5 rounded-2xl border border-neutral-200">
                             <span className="text-neutral-700">
                               <strong className="text-neutral-950 font-bold font-mono">{item.stepNumber}</strong> {item.title}: {item.description}
@@ -287,7 +310,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
                         </div>
                         <div className="flex justify-between text-xs">
                           <span className="text-neutral-500">Duration:</span>
-                          <span className="text-neutral-900 font-mono tabular-nums font-bold">{event.persistenceSec} sec</span>
+                          <span className="text-neutral-900 font-mono tabular-nums font-bold">{event.persistenceSec.toFixed(2)} sec</span>
                         </div>
                       </div>
 
@@ -300,7 +323,7 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
                         }}
                         className="w-full gap-2 rounded-xl font-semibold shadow-xs"
                       >
-                        <span>Review Evidence</span>
+                        <span>{isDecisionMade ? 'Open Decision Record' : 'Review Evidence'}</span>
                         <ArrowRight size={14} />
                       </Button>
                     </div>
@@ -309,8 +332,10 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
               );
             })
           )}
+          </div>
         </div>
       </div>
+      </section>
     </div>
   );
 };

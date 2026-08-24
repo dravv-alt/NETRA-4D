@@ -1,50 +1,23 @@
-# Python
+# Python Cache
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.env
-.secrets/
-credentials.json
-client_secret*.json
-service-account*.json
-service_account*.json
-kaggle.json
 
-# Jupyter
-.ipynb_checkpoints
-
-# Datasets & Weights
-*.pt
-*.pth
-*.onnx
-*.engine
-*.npz
-*.pkl
-data/raw/
-models/weights/
-outputs/
-*.mp4
-*.avi
-*.mkv
-*.mov
-*.zip
-*.tar
-*.tar.gz
-
-# PyTest
+# PyTest & Linters
 .pytest_cache/
 pytest-cache-files-*/
-
-# Tool and build caches
 .ruff_cache/
 .mypy_cache/
-*.egg-info/
 
-# VS Code / IDE
-.vscode/
-.idea/
+# Node Modules & Frontend Build
+Frontend_Updated/node_modules/
+
+# Files exceeding GitHub 100MB limit & Gigabyte Raw Output Dumps
+Final_Presentation.mp4
+*.zip
+outputs/
+OUTPUT/netra4d_final_*
+OUTPUT/live_*
+OUTPUT/operational-report-browser-profile/
+PRELOADED_IMG_VID_DEMO/*.avi
+PRELOADED_IMG_VID_DEMO/*.mp4

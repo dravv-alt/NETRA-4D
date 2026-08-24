@@ -4,12 +4,11 @@ import { CommandCenterView } from './components/command-center/CommandCenterView
 import { LiveMonitorView } from './components/video/LiveMonitorView';
 import { EventQueueView } from './components/triage/EventQueueView';
 import { EvidenceReviewView } from './components/evidence-review/EvidenceReviewView';
-import { BenchmarkLabView } from './components/benchmark/BenchmarkLabView';
-import { SystemControlView } from './components/system/SystemControlView';
 import { CandidatesView } from './components/candidates/CandidatesView';
 import { CasesView } from './components/cases/CasesView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
-import { DesignSystemView } from './components/design-system/DesignSystemView';
+import { SystemControlView } from './components/system/SystemControlView';
+import { BenchmarkLabView } from './components/benchmark/BenchmarkLabView';
 
 import { SEATS_DATA, INITIAL_EVENTS, CAMERA_FEEDS, SYSTEM_HEALTH } from './data/demoData';
 import { SeatNodeData, TriagedAIEvent, SystemHealthData } from './types';
@@ -49,12 +48,26 @@ export const App: React.FC = () => {
     fetch(`${api}/api/events?limit=200`).then((response) => response.ok ? response.json() : Promise.reject()).then((records) => {
       if (records.length) setEvents(records.map(toFrontendEvent));
     }).catch(() => undefined);
-    const socket = new WebSocket(`${api.replace(/^http/, 'ws')}/ws/events`);
-    socket.onmessage = (message) => {
-      const incoming = toFrontendEvent(JSON.parse(message.data));
-      setEvents((current) => [incoming, ...current.filter((event) => event.id !== incoming.id)]);
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    const connectTimer = window.setTimeout(() => {
+      if (disposed) return;
+      socket = new WebSocket(`${api.replace(/^http/, 'ws')}/ws/events`);
+      socket.onmessage = (message) => {
+        if (disposed) return;
+        const incoming = toFrontendEvent(JSON.parse(message.data));
+        setEvents((current) => [incoming, ...current.filter((event) => event.id !== incoming.id)]);
+      };
+    }, 0);
+    // React StrictMode can dispose an effect while the handshake is still
+    // pending. Do not close a CONNECTING socket; let it open and immediately
+    // close cleanly instead of surfacing "closed before connection" errors.
+    return () => {
+      disposed = true;
+      window.clearTimeout(connectTimer);
+      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'component unmounted');
+      else if (socket?.readyState === WebSocket.CONNECTING) socket.onopen = () => socket?.close(1000, 'component unmounted');
     };
-    return () => socket.close();
   }, []);
 
   // Handle seat selection from Map
@@ -148,10 +161,9 @@ export const App: React.FC = () => {
         handleReviewEvent(ev);
         break;
       }
-      case 'preset-benchmark': {
+      case 'preset-benchmark':
         setActiveTab('benchmark');
         break;
-      }
       default:
         break;
     }
@@ -183,7 +195,7 @@ export const App: React.FC = () => {
           cameras={CAMERA_FEEDS}
           onViewCandidateDossier={(seatId) => {
             setSelectedSeatId(seatId);
-            setActiveTab('candidates');
+            setActiveTab('live-monitor');
           }}
         />
       )}
@@ -214,7 +226,8 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* 5. CANDIDATE INTELLIGENCE */}
+      {/* Legacy Audit & Intelligence pages remain wired to the same live data so
+          direct navigation never falls through to an empty shell. */}
       {activeTab === 'candidates' && (
         <CandidatesView
           seats={seats}
@@ -223,11 +236,7 @@ export const App: React.FC = () => {
           selectedSeatId={selectedSeatId}
         />
       )}
-
-      {/* 6. FORMAL CASES & AUDIT EXPORT */}
       {activeTab === 'cases' && <CasesView />}
-
-      {/* 7. TELEMETRY & OPERATIONS ANALYTICS */}
       {activeTab === 'analytics' && (
         <AnalyticsView
           seats={seats}
@@ -237,17 +246,9 @@ export const App: React.FC = () => {
           }}
         />
       )}
-
-      {/* 8. SYSTEM HARDWARE & CAMERAS */}
-      {activeTab === 'system-cameras' && (
-        <SystemControlView cameras={CAMERA_FEEDS} health={health} />
-      )}
-
-      {/* 9. BENCHMARK LAB */}
+      {activeTab === 'system-cameras' && <SystemControlView cameras={CAMERA_FEEDS} health={health} />}
       {activeTab === 'benchmark' && <BenchmarkLabView />}
 
-      {/* 10. LIVING DESIGN SYSTEM SPECIFICATION */}
-      {activeTab === 'design-system' && <DesignSystemView />}
     </AppShell>
   );
 };

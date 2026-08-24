@@ -6,7 +6,7 @@ import { ProviderSelector } from './ProviderSelector';
 import { AIProvider, CameraFeedInfo, TriagedAIEvent } from '../../types';
 import { StatusBadge } from '../ui/StatusBadge';
 import { ConfidenceBar } from '../ui/ConfidenceBar';
-import { ArrowRight, Camera, CheckCircle2, ExternalLink, FileJson, Image, Radio, Square, Upload, Video } from 'lucide-react';
+import { ArrowRight, Camera, CheckCircle2, ExternalLink, FileJson, Image, Play, Radio, Square, Upload, Video } from 'lucide-react';
 import { playHapticSound } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { ParallaxCard } from '../ui/parallax-card';
@@ -32,6 +32,14 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   const [fallbackActive, setFallbackActive] = useState(true);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const browserStreamRef = useRef<MediaStream | null>(null);
+  const browserTimerRef = useRef<number | null>(null);
+  const browserVideoRef = useRef<HTMLVideoElement | null>(null);
+  const browserCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const browserPublishSettingsRef = useRef<{ width: number; height: number; fps: number } | null>(null);
+  const browserSendingRef = useRef(false);
+  const [invigilatorId, setInvigilatorId] = useState('INVIGILATOR');
+  const [monitoringBusy, setMonitoringBusy] = useState(false);
   const [activeProvider, setActiveProvider] = useState<AIProvider>('fusion');
   const [layers, setLayers] = useState<AILayersState>({
     personBoxes: true,
@@ -47,10 +55,61 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   const selectedCam = cameras.find((c) => c.id === selectedCameraId) || cameras[0];
   const activeEvent = events.find((e) => e.seatId === 'A06') || events[0];
   const selectedSample = showcaseSamples.find((sample) => sample.asset_id === selectedSampleId) || showcaseSamples[0];
+  const monitoringState = session?.status;
+  const isArmed = monitoringState === 'ARMED';
+  const isPaused = monitoringState === 'PAUSED';
+  const isMonitoring = monitoringState === 'RUNNING';
 
   const handleToggleLayer = (key: keyof AILayersState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const pauseBrowserPublisher = () => {
+    if (browserTimerRef.current !== null) window.clearInterval(browserTimerRef.current);
+    browserTimerRef.current = null;
+    browserSendingRef.current = false;
+  };
+
+  const stopBrowserPublisher = () => {
+    pauseBrowserPublisher();
+    browserStreamRef.current?.getTracks().forEach((track) => track.stop());
+    browserStreamRef.current = null;
+    browserVideoRef.current = null;
+    browserCanvasRef.current = null;
+    browserPublishSettingsRef.current = null;
+  };
+
+  const startBrowserPublisher = (browserSession: any) => {
+    const video = browserVideoRef.current;
+    const canvas = browserCanvasRef.current;
+    const settings = browserPublishSettingsRef.current;
+    const context = canvas?.getContext('2d');
+    if (!video || !canvas || !settings || !context) throw new Error('Browser camera is armed but no frame publisher is available');
+    pauseBrowserPublisher();
+    browserTimerRef.current = window.setInterval(() => {
+      if (video.readyState < 2 || browserSendingRef.current) return;
+      context.drawImage(video, 0, 0, settings.width, settings.height);
+      // Claim the slot before encoding: toBlob is asynchronous and otherwise
+      // multiple JPEG uploads can pile up and exhaust the browser.
+      browserSendingRef.current = true;
+      canvas.toBlob(async (blob) => {
+        if (!blob) { browserSendingRef.current = false; return; }
+        try {
+          const frameResponse = await fetch(`${apiBase}${browserSession.browser_frame_url}`, {
+            method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob,
+          });
+          if (!frameResponse.ok) throw new Error(await frameResponse.text());
+        } catch (error) {
+          setLiveError(`Browser frame transport stopped: ${String(error)}`);
+          stopBrowserPublisher();
+        } finally {
+          browserSendingRef.current = false;
+        }
+      }, 'image/jpeg', 0.68);
+    }, Math.round(1000 / settings.fps));
+  };
+
+  useEffect(() => () => stopBrowserPublisher(), []);
 
   useEffect(() => {
     fetch(`${apiBase}/api/showcase?limit=3`)
@@ -63,35 +122,86 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   }, [apiBase]);
 
   useEffect(() => {
-    if (!session?.session_id) return;
-    const socket = new WebSocket(`${apiBase.replace(/^http/, 'ws')}/ws/live/${session.session_id}`);
-    socket.onmessage = (message) => { setTelemetry(JSON.parse(message.data)); setFallbackActive(false); };
-    socket.onerror = () => { setLiveError('Live telemetry unavailable; showing a verified previous run.'); setShowSourcePreview(false); setFallbackActive(true); };
-    return () => socket.close();
-  }, [apiBase, session?.session_id]);
+    if (!session?.session_id || !isMonitoring) return;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    const connectTimer = window.setTimeout(() => {
+      if (disposed) return;
+      socket = new WebSocket(`${apiBase.replace(/^http/, 'ws')}/ws/live/${session.session_id}`);
+      socket.onmessage = (message) => { if (!disposed) { setTelemetry(JSON.parse(message.data)); setFallbackActive(false); } };
+      socket.onerror = () => { if (!disposed) { setLiveError('Live telemetry unavailable; showing a verified previous run.'); setShowSourcePreview(false); setFallbackActive(true); } };
+    }, 0);
+    return () => {
+      disposed = true;
+      window.clearTimeout(connectTimer);
+      if (socket?.readyState === WebSocket.OPEN) socket.close(1000, 'monitoring view unmounted');
+      else if (socket?.readyState === WebSocket.CONNECTING) socket.onopen = () => socket?.close(1000, 'monitoring view unmounted');
+    };
+  }, [apiBase, session?.session_id, isMonitoring]);
 
   useEffect(() => {
-    if (!session?.session_id || telemetry) return;
+    if (!session?.session_id || !isMonitoring || telemetry) return;
     const timer = window.setTimeout(() => {
       setFallbackActive(true);
       setShowSourcePreview(false);
       setLiveError('Live first frame is taking longer than expected; verified proof-of-work fallback is playing.');
     }, 10000);
     return () => window.clearTimeout(timer);
-  }, [session?.session_id, telemetry]);
+  }, [session?.session_id, telemetry, isMonitoring]);
 
-  const startWebcam = async () => {
-    setLiveError(''); setTelemetry(null); setFallbackActive(false);
+  const armBrowserWebcam = async () => {
+    setLiveError(''); setTelemetry(null); setFallbackActive(true);
     try {
-      const response = await fetch(`${apiBase}/api/live/sessions/webcam?source=0`, { method: 'POST' });
+      stopBrowserPublisher();
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not expose webcam access');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        // Bounded input keeps CPU inference and browser upload predictable.
+        video: { width: { ideal: 640, max: 640 }, height: { ideal: 360, max: 360 }, frameRate: { ideal: 2, max: 2 } },
+        audio: false,
+      });
+      browserStreamRef.current = stream;
+      const video = document.createElement('video');
+      video.srcObject = stream; video.muted = true; video.playsInline = true;
+      await video.play();
+      browserVideoRef.current = video;
+      const settings = stream.getVideoTracks()[0].getSettings();
+      const width = settings.width || video.videoWidth || 640;
+      const height = settings.height || video.videoHeight || 480;
+      const publishFps = 2;
+      const response = await fetch(`${apiBase}/api/live/sessions/browser?width=${width}&height=${height}&fps=${publishFps}`, { method: 'POST' });
       if (!response.ok) throw new Error(await response.text());
-      setSession(await response.json());
-    } catch (error) { setLiveError(`${String(error)}; showing verified fallback.`); setShowSourcePreview(false); setFallbackActive(true); }
+      const browserSession = await response.json();
+      setSession(browserSession);
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      browserCanvasRef.current = canvas;
+      browserPublishSettingsRef.current = { width, height, fps: publishFps };
+    } catch (error) {
+      stopBrowserPublisher();
+      setLiveError(`${String(error)}; showing verified fallback.`); setShowSourcePreview(false); setFallbackActive(true);
+    }
+  };
+
+  const startMonitoring = async () => {
+    if (!session?.session_id || (!isArmed && !isPaused)) return;
+    setMonitoringBusy(true); setLiveError(''); setTelemetry(null); setFallbackActive(false);
+    try {
+      const response = await fetch(`${apiBase}/api/live/sessions/${session.session_id}/start?operator=${encodeURIComponent(invigilatorId || 'INVIGILATOR')}`, { method: 'POST' });
+      if (!response.ok) throw new Error(await response.text());
+      const startedSession = await response.json();
+      setSession(startedSession);
+      if (startedSession.source_kind === 'BROWSER_WEBCAM') startBrowserPublisher(startedSession);
+    } catch (error) {
+      setLiveError(`Monitoring did not start: ${String(error)}`); setFallbackActive(true);
+    } finally {
+      setMonitoringBusy(false);
+    }
   };
 
   const uploadVideo = async (file: File) => {
-    setLiveError(''); setTelemetry(null); setFallbackActive(false);
+    setLiveError(''); setTelemetry(null); setFallbackActive(true);
     try {
+      stopBrowserPublisher();
       const response = await fetch(`${apiBase}/api/live/sessions/upload?filename=${encodeURIComponent(file.name)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
       });
@@ -101,8 +211,15 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   };
 
   const stopSession = async () => {
-    if (session?.session_id) await fetch(`${apiBase}/api/live/sessions/${session.session_id}/stop`, { method: 'POST' });
-    setSession(null); setTelemetry(null); setShowSourcePreview(false); setFallbackActive(true);
+    pauseBrowserPublisher();
+    if (session?.session_id) {
+      const response = await fetch(`${apiBase}/api/live/sessions/${session.session_id}/stop?operator=${encodeURIComponent(invigilatorId || 'INVIGILATOR')}`, { method: 'POST' });
+      if (response.ok) {
+        const result = await response.json();
+        setSession({ ...session, status: result.status });
+      }
+    }
+    setTelemetry(null); setShowSourcePreview(false); setFallbackActive(true);
   };
 
   return (
@@ -110,17 +227,20 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
       {/* Top Controls */}
       <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-neutral-200">
         <div className="flex items-center gap-2">
-          <Button onClick={startWebcam} className="gap-2 rounded-xl"><Camera size={14} /> Start Webcam</Button>
-          <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2 rounded-xl"><Upload size={14} /> Upload & Stream</Button>
+          <Button onClick={armBrowserWebcam} className="gap-2 rounded-xl"><Camera size={14} /> Arm Browser Webcam</Button>
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2 rounded-xl"><Upload size={14} /> Upload & Arm</Button>
           <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadVideo(e.target.files[0])} />
-          {session && <Button variant="destructive" onClick={stopSession} className="gap-2 rounded-xl"><Square size={13} /> Stop</Button>}
+          <input value={invigilatorId} onChange={(event) => setInvigilatorId(event.target.value)} aria-label="Invigilator ID" className="w-32 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono" placeholder="Invigilator ID" />
+          {(isArmed || isPaused) && <Button onClick={startMonitoring} disabled={monitoringBusy} className="gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800"><Play size={13} /> {monitoringBusy ? 'Starting…' : isPaused ? 'Invigilator Resume Monitoring' : 'Invigilator Start Monitoring'}</Button>}
+          {isMonitoring && <Button variant="destructive" onClick={stopSession} className="gap-2 rounded-xl"><Square size={13} /> Invigilator Stop Monitoring</Button>}
           <input
             className="w-64 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono"
             placeholder="RTSP via MediaMTX: rtsp://127.0.0.1:8554/exam"
             onKeyDown={async (e) => {
               if (e.key !== 'Enter') return;
               const source = (e.currentTarget as HTMLInputElement).value;
-              setTelemetry(null); setShowSourcePreview(false); setFallbackActive(false); setLiveError('');
+              stopBrowserPublisher();
+              setTelemetry(null); setShowSourcePreview(false); setFallbackActive(true); setLiveError('');
               try {
                 const response = await fetch(`${apiBase}/api/live/sessions/webcam?source=${encodeURIComponent(source)}`, { method: 'POST' });
                 if (!response.ok) throw new Error(await response.text());
@@ -171,6 +291,13 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
         />
       </div>
 
+      {session && (
+        <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-xs ${isMonitoring ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : isArmed || isPaused ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-neutral-200 bg-neutral-50 text-neutral-700'}`}>
+          <div><strong>Invigilator computation gate: </strong>{isMonitoring ? 'frames are being sent for inference and evidence logging.' : isPaused ? 'camera/feed remains armed; new frames are not computed or logged until Resume Monitoring.' : isArmed ? 'source is armed; no frames are sent to inference until Start Monitoring.' : 'this source is stopped; arm a new source to create another monitoring window.'}</div>
+          <span className="font-mono font-bold">STATE: {monitoringState}</span>
+        </div>
+      )}
+
       {/* Main Content Grid: Player + Telemetry Cards */}
       <div className="grid grid-cols-12 gap-8 items-start">
         {/* Main Video Viewport (8 Cols) */}
@@ -181,9 +308,9 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
             fps={selectedCam.fps}
             activeProvider={activeProvider}
             layers={layers}
-            liveStreamUrl={session && !fallbackActive ? `${apiBase}${session.stream_url}` : undefined}
+            liveStreamUrl={isMonitoring && !fallbackActive ? `${apiBase}${session.stream_url}` : undefined}
             recordedVideoUrl={selectedSample && (fallbackActive || !session) ? `${apiBase}${showSourcePreview && selectedSample.source.preview_url ? selectedSample.source.preview_url : selectedSample.annotated_video_url}` : undefined}
-            liveStatus={session && !fallbackActive ? (telemetry ? 'LIVE • FRAME-BY-FRAME' : 'INITIALIZING MODELS') : selectedSample ? (showSourcePreview ? 'SOURCE INPUT • NO ANNOTATIONS' : 'VERIFIED PREVIOUS RUN') : undefined}
+            liveStatus={isMonitoring && !fallbackActive ? (telemetry ? 'LIVE • FRAME-BY-FRAME' : 'INITIALIZING MODELS') : isArmed ? 'ARMED • INVIGILATOR START REQUIRED' : isPaused ? 'COMPUTATION PAUSED • FEED REMAINS ARMED' : monitoringState === 'STOPPED' ? 'MONITORING STOPPED • RE-ARM SOURCE TO START AGAIN' : selectedSample ? (showSourcePreview ? 'SOURCE INPUT • NO ANNOTATIONS' : 'VERIFIED PREVIOUS RUN') : undefined}
             onLiveStreamError={() => { setShowSourcePreview(false); setFallbackActive(true); setLiveError('Live video transport failed; verified output fallback activated.'); }}
           />
           {liveError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{liveError}</div>}

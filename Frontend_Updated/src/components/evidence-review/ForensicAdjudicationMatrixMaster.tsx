@@ -131,7 +131,7 @@ export const ForensicAdjudicationMatrixMaster: React.FC<ForensicAdjudicationMatr
               Kinematic Pose & Spatial Allocation
             </h3>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Sub-pixel 3D joint homography calculated on NVIDIA T4 Tensor Core.
+              2-D COCO keypoints, head-direction proxy, and candidate-relative wrist geometry.
             </p>
           </div>
           <span className="text-3xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200">
@@ -142,23 +142,23 @@ export const ForensicAdjudicationMatrixMaster: React.FC<ForensicAdjudicationMatr
         {/* 4 Inset Data Blocks */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div className="p-4.5 rounded-2xl bg-[#F8F9FA] border border-neutral-200/60 space-y-1">
-            <div className="text-3xs font-mono uppercase text-neutral-500">Head Gaze Vector</div>
-            <div className="font-mono font-bold text-sm text-neutral-950">-18.4° Pitch (Lap)</div>
+            <div className="text-3xs font-mono uppercase text-neutral-500">Head Direction Evidence</div>
+            <div className="font-mono font-bold text-sm text-neutral-950">2-D Proxy · Review Required</div>
           </div>
 
           <div className="p-4.5 rounded-2xl bg-[#F8F9FA] border border-neutral-200/60 space-y-1">
-            <div className="text-3xs font-mono uppercase text-neutral-500">Wrist Keying Offset</div>
-            <div className="font-mono font-bold text-sm text-neutral-950">0.18m Lap Proximity</div>
+            <div className="text-3xs font-mono uppercase text-neutral-500">Wrist / Hip Relation</div>
+            <div className="font-mono font-bold text-sm text-neutral-950">Pose-Relative · Normalized</div>
           </div>
 
           <div className="p-4.5 rounded-2xl bg-[#F8F9FA] border border-neutral-200/60 space-y-1">
             <div className="text-3xs font-mono uppercase text-neutral-500">Continuous Duration</div>
-            <div className="font-mono font-bold text-sm text-neutral-950">13.2s Anomaly Burst</div>
+            <div className="font-mono font-bold text-sm text-neutral-950">Read from Event JSONL</div>
           </div>
 
           <div className="p-4.5 rounded-2xl bg-[#F8F9FA] border border-neutral-200/60 space-y-1">
             <div className="text-3xs font-mono uppercase text-neutral-500">Counter-Evidence Mask</div>
-            <div className="font-mono font-bold text-sm text-neutral-950">None Detected (0%)</div>
+            <div className="font-mono font-bold text-sm text-neutral-950">Preserved for Reviewer</div>
           </div>
         </div>
       </div>

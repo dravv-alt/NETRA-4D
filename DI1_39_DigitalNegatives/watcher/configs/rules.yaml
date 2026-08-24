@@ -1,0 +1,101 @@
+# Watcher Rule Engine Configuration
+# Phase 7: Rule Engine and Adaptive Baseline
+
+rules:
+  # Sideward glance detection
+  sideward_glance:
+    enabled: true
+    yaw_threshold_deg: 20        # Lowered for higher glance sensitivity
+    minimum_duration_sec: 0.4    # Reduced to catch quick glances
+    minimum_count: 2             # 2 glances in 60s
+    time_window_sec: 60
+    confidence_threshold: 0.45
+    weight: 3
+
+  # Sustained head turn
+  sustained_head_turn:
+    enabled: true
+    yaw_threshold_deg: 25        # Catch turns toward neighbour
+    minimum_duration_sec: 1.5    # 1.5s sustained
+    confidence_threshold: 0.45
+    weight: 4
+
+  # Body/torso rotation toward neighbour
+  torso_rotation:
+    enabled: true
+    torso_angle_threshold_deg: 12   # 12 deg tilt
+    target: "neighbour_seat"
+    minimum_duration_sec: 2.0       # 2s sustained
+    confidence_threshold: 0.45
+    weight: 4
+
+  # Hand below desk / in lap (chit concealment proxy)
+  hand_below_desk:
+    enabled: true
+    minimum_duration_sec: 2.0       # 2s sustained below desk
+    confidence_threshold: 0.40
+    weight: 4
+
+  # Hand near ear (listening/talking)
+  hand_near_ear:
+    enabled: true
+    distance_threshold_ratio: 0.35  # Relative to shoulder width
+    minimum_duration_sec: 1.0       # 1s sustained
+    confidence_threshold: 0.40
+    weight: 4
+
+  # Hand near face/mouth (candidate talking/whispering)
+  hand_near_face:
+    enabled: true
+    distance_threshold_ratio: 0.30  # Relative to shoulder width
+    minimum_duration_sec: 1.0       # 1s sustained
+    confidence_threshold: 0.40
+    weight: 3
+
+  # Repeated hand gesture
+  repeated_gesture:
+    enabled: true
+    minimum_count: 2
+    time_window_sec: 30
+    similarity_threshold: 0.65
+    weight: 5
+
+  # Object near hand (fusion)
+  object_near_hand:
+    enabled: true
+    distance_threshold_px: 120      # 120px perimeter
+    minimum_duration_sec: 0.5       # 0.5s duration
+    suspicious_classes:
+      - "cell phone"
+    weight: 6
+
+  # Phone detected
+  phone_detected:
+    enabled: true
+    minimum_confidence: 0.70        # High-confidence phone detections only
+    minimum_duration_sec: 0.3
+    weight: 8
+
+# Adaptive baseline configuration
+baseline:
+  enabled: true
+  learning_period_sec: 120
+  method: "ema"
+  ema_alpha: 0.01
+  features:
+    - "glance_rate_per_minute"
+    - "head_movement_energy"
+    - "hand_cadence"
+    - "posture_shift_rate"
+  deviation_threshold: 2.5
+  min_baseline_samples: 30
+
+# Alert thresholds
+alerts:
+  low_threshold: 25
+  mild_threshold: 45
+  moderate_threshold: 70
+  high_threshold: 85
+  sustained_duration_sec: 3
+  cooldown_sec: 15
+  max_alerts_per_minute: 4

@@ -169,9 +169,9 @@ export const SystemControlView: React.FC<SystemControlViewProps> = ({
             <div className="font-bold text-base text-neutral-950 pb-3 border-b border-neutral-200 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Server size={16} className="text-neutral-900" />
-                <span>NVIDIA T4 Tensor Core GPU Telemetry</span>
+                <span>Controlled Runtime Telemetry</span>
               </div>
-              <StatusBadge status="HEALTHY" label="OPTIMAL" size="sm" />
+              <StatusBadge status="AVAILABLE" label="DEMO" size="sm" />
             </div>
             <div className="space-y-4 text-xs">
               <div className="flex justify-between items-center p-3 rounded-xl bg-neutral-50 border border-neutral-200">

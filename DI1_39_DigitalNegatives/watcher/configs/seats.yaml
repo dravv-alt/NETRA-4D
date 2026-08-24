@@ -1,0 +1,92 @@
+# Watcher Seat Calibration Configuration
+# Phase 3: Tracking and SeatTrack Binding
+# Updated to match sample.mkv video layout
+# INTEGRATION WARNING: these polygons are calibrated only for the incoming
+# sample camera. They must not be reused for another video/camera without a
+# fresh calibration and visual verification.
+
+# Camera configuration
+camera:
+  id: "CAM-01"
+  name: "Main Hall Camera"
+  # Resolution (should match video source)
+  width: 1280
+  height: 720
+
+# Seat layout definition
+# Each seat has a unique ID and a polygon defining its region in image coordinates
+# Polygon format: [[x1, y1], [x2, y2], [x3, y3], [x4, y4]] (clockwise)
+# Based on detected chair positions in sample.mkv:
+# chair: bbox=(414,543,602,720) conf=0.733
+# chair: bbox=(558,421,693,700) conf=0.623
+# chair: bbox=(862,346,1018,585) conf=0.573
+# chair: bbox=(675,336,788,573) conf=0.563
+# chair: bbox=(768,513,972,719) conf=0.531
+# chair: bbox=(919,271,1031,441) conf=0.525
+
+seats:
+  - id: "A-01"
+    row: "A"
+    column: 1
+    polygon: [[400, 520], [620, 520], [620, 720], [400, 720]]
+    desk_line: [[400, 540], [620, 540]]
+    neighbours: ["A-02"]
+  
+  - id: "A-02"
+    row: "A"
+    column: 2
+    polygon: [[540, 400], [710, 400], [710, 700], [540, 700]]
+    desk_line: [[540, 420], [710, 420]]
+    neighbours: ["A-01", "A-03"]
+  
+  - id: "A-03"
+    row: "A"
+    column: 3
+    polygon: [[650, 310], [810, 310], [810, 580], [650, 580]]
+    desk_line: [[650, 340], [810, 340]]
+    neighbours: ["A-02", "A-04"]
+  
+  - id: "A-04"
+    row: "A"
+    column: 4
+    polygon: [[750, 490], [990, 490], [990, 720], [750, 720]]
+    desk_line: [[750, 510], [990, 510]]
+    neighbours: ["A-03", "A-05"]
+  
+  - id: "A-05"
+    row: "A"
+    column: 5
+    polygon: [[900, 250], [1050, 250], [1050, 450], [900, 450]]
+    desk_line: [[900, 270], [1050, 270]]
+    neighbours: ["A-04"]
+
+# Camera coverage map
+coverage:
+  # Polygons defining areas covered by this camera
+  covered_regions:
+    - [[380, 240], [1070, 240], [1070, 720], [380, 720]]
+  
+  # Seats that are NOT well covered (blind spots)
+  blind_spots: []
+  
+  # Seats with partial coverage (low confidence)
+  low_confidence_zones: []
+
+# Seat mapping settings
+mapping:
+  # Method to assign track to seat: "centroid", "bottom_center", "bbox_overlap"
+  method: "bottom_center"
+  
+  # Minimum overlap ratio for bbox_overlap method
+  min_overlap_ratio: 0.3
+  
+  # Maximum distance for centroid method (pixels)
+  max_centroid_distance: 100
+  
+  # Allow tracks outside defined seats (hallway, etc.)
+  allow_unassigned: true
+  unassigned_prefix: "UNASSIGNED_"
+  
+  # Tracking parameters
+  max_age: 30
+  min_hits: 1  # Changed from 3 to 1 for faster track confirmation

@@ -1,0 +1,9 @@
+# Generated/runtime files from the incoming Watcher work are not source evidence.
+__pycache__/
+*.py[cod]
+*.pt
+*.db
+*.db-*
+outputs/
+data/videos/
+

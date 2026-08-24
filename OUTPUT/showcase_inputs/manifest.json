@@ -1,0 +1,37 @@
+{
+  "assets": [
+    {
+      "asset_id": "VIDEO_01",
+      "preview_file": "VIDEO_01_source_preview.mp4",
+      "original_filename": "Seat No. 12 was seen taking a piece of paper from the desk.mkv",
+      "source_url": "https://drive.google.com/file/d/12AuvNrLQun7DLr3Oxq60WC6bLeZNWeQI/view?usp=sharing",
+      "verified_source_sha256": "87c8c1ff8fef393e11d289d3872d8c50cf98e67a9969e6c47b888221f2dfd673",
+      "preview_bytes": 5616480,
+      "annotated_preview_file": "VIDEO_01_annotated_preview.mp4",
+      "annotated_preview_bytes": 25661833,
+      "meaning": "Browser-compatible transcode of the hash-verified original source; no annotations."
+    },
+    {
+      "asset_id": "VIDEO_02",
+      "preview_file": "VIDEO_02_source_preview.mp4",
+      "original_filename": "04.CCTV Candidate Talking.mkv",
+      "source_url": "https://drive.google.com/file/d/1Dk-t3uNEZdfiNB0X5H6THeMs1PKhW53V/view?usp=sharing",
+      "verified_source_sha256": "3811d5707ceed209627e1c79b0ba7f550b2a3db3582eca163491ae1bd6d73dc1",
+      "preview_bytes": 3798937,
+      "annotated_preview_file": "VIDEO_02_annotated_preview.mp4",
+      "annotated_preview_bytes": 14336842,
+      "meaning": "Browser-compatible transcode of the hash-verified original source; no annotations."
+    },
+    {
+      "asset_id": "VIDEO_03",
+      "preview_file": "VIDEO_03_source_preview.mp4",
+      "original_filename": "01.Candidate was found using a mobile phone in the examination hall..mkv",
+      "source_url": "https://drive.google.com/file/d/1MFD3E5hu-Jj3H1cPBSMqOaFE7W1mJB7y/view?usp=sharing",
+      "verified_source_sha256": "b842b03e5784d867e93770560d88150a526250df69077cd3065edbbd4c842098",
+      "preview_bytes": 3390203,
+      "annotated_preview_file": "VIDEO_03_annotated_preview.mp4",
+      "annotated_preview_bytes": 14718939,
+      "meaning": "Browser-compatible transcode of the hash-verified original source; no annotations."
+    }
+  ]
+}

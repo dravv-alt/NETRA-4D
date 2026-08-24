@@ -12,7 +12,7 @@ from pathlib import Path
 import queue
 import sys
 import threading
-from time import monotonic, perf_counter
+from time import monotonic, perf_counter, sleep
 from uuid import uuid4
 
 import cv2
@@ -99,6 +99,91 @@ class BoundedCapture:
         self.capture.release()
 
 
+class BrowserFrameCapture:
+    """Consume the newest browser-published JPEG without allowing latency buildup."""
+
+    def __init__(self, directory: Path, width: int, height: int, fps: float, maximum_queue: int = 2):
+        self.directory = directory
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.width = width
+        self.height = height
+        self.fps = fps or 5.0
+        self.frame_interval = 1.0 / self.fps
+        self.capture = self
+        self.queue: queue.Queue[FramePacket] = queue.Queue(maxsize=maximum_queue)
+        self.stopped = threading.Event()
+        self.dropped = 0
+        self.thread = threading.Thread(target=self._read, daemon=True)
+
+    def get(self, property_id: int) -> float:
+        if property_id == cv2.CAP_PROP_FRAME_WIDTH:
+            return float(self.width)
+        if property_id == cv2.CAP_PROP_FRAME_HEIGHT:
+            return float(self.height)
+        if property_id == cv2.CAP_PROP_FPS:
+            return float(self.fps)
+        return 0.0
+
+    def start(self):
+        self.thread.start()
+
+    def _read(self):
+        latest = self.directory / "latest.jpg"
+        stop = self.directory / "STOP"
+        last_mtime = -1
+        index = 0
+        while not self.stopped.is_set() and not stop.exists():
+            try:
+                mtime = latest.stat().st_mtime_ns
+            except OSError:
+                sleep(0.02)
+                continue
+            if mtime == last_mtime:
+                sleep(0.01)
+                continue
+            frame = cv2.imread(str(latest))
+            if frame is None:
+                sleep(0.01)
+                continue
+            last_mtime = mtime
+            packet = FramePacket(index, monotonic(), frame)
+            try:
+                self.queue.put_nowait(packet)
+            except queue.Full:
+                try:
+                    self.queue.get_nowait()
+                    self.dropped += 1
+                except queue.Empty:
+                    pass
+                self.queue.put_nowait(packet)
+            index += 1
+        self.stopped.set()
+
+    def get_frame(self, timeout: float = 1.0) -> FramePacket | None:
+        try:
+            return self.queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def close(self):
+        self.stopped.set()
+        self.thread.join(timeout=2)
+
+
+def publish_atomic(path: Path, payload: bytes) -> bool:
+    """Publish live state without crashing when a Windows reader briefly locks the target."""
+    temporary = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+    temporary.write_bytes(payload)
+    for _attempt in range(8):
+        try:
+            temporary.replace(path)
+            return True
+        except OSError:
+            sleep(0.01)
+    temporary.unlink(missing_ok=True)
+    return False
+
+
 def write_clip(
     path: Path, frames: list[np.ndarray], fps: float, ended_at_sec: float,
     record: EventRecord, repository: EventRepository,
@@ -126,6 +211,10 @@ def write_clip(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", default="0", help="Webcam index, RTSP URL, or video path")
+    parser.add_argument("--browser-frame-dir", type=Path, help="Directory receiving atomic latest.jpg browser frames")
+    parser.add_argument("--browser-width", type=int, default=640)
+    parser.add_argument("--browser-height", type=int, default=480)
+    parser.add_argument("--browser-fps", type=float, default=5.0)
     parser.add_argument("--camera-id", default="LIVE_CAM_01")
     parser.add_argument("--pose-model", default="models/weights/yolo26n-pose.pt")
     parser.add_argument("--object-model", default="models/weights/yolo26n.pt")
@@ -154,6 +243,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/live_runs"))
     parser.add_argument("--database", type=Path, default=Path("outputs/netra4d_events.sqlite"))
     parser.add_argument("--live-publish-dir", type=Path, help="Atomically publish latest.jpg and latest.json for the API")
+    parser.add_argument("--monitoring-control-file", type=Path, help="When absent, keep the live feed running but skip inference")
     args = parser.parse_args()
 
     source = int(args.source) if args.source.isdigit() else args.source
@@ -201,7 +291,11 @@ def main() -> int:
     )
     source_path = Path(str(source)) if isinstance(source, str) and not str(source).lower().startswith(("rtsp://", "rtmp://")) else None
     lossless_file_source = bool(source_path and source_path.is_file())
-    capture = BoundedCapture(source, maximum_queue=2, pace_file=lossless_file_source)
+    browser_frame_dir = (ROOT / args.browser_frame_dir).resolve() if args.browser_frame_dir else None
+    capture = (
+        BrowserFrameCapture(browser_frame_dir, args.browser_width, args.browser_height, args.browser_fps)
+        if browser_frame_dir else BoundedCapture(source, maximum_queue=2, pace_file=lossless_file_source)
+    )
     if scene:
         scene.validate_frame_geometry(
             int(capture.capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -227,6 +321,7 @@ def main() -> int:
     futures = []
     stream_path = run_dir / "live_annotated.mp4"
     publish_dir = (ROOT / args.live_publish_dir).resolve() if args.live_publish_dir else None
+    monitoring_control_file = (ROOT / args.monitoring_control_file).resolve() if args.monitoring_control_file else None
     if publish_dir:
         publish_dir.mkdir(parents=True, exist_ok=True)
     stream_writer = None
@@ -235,8 +330,11 @@ def main() -> int:
     capture.start()
     try:
         while not capture.stopped.is_set() or not capture.queue.empty():
-            packet = capture.get()
+            packet = capture.get_frame() if isinstance(capture, BrowserFrameCapture) else capture.get()
             if packet is None:
+                continue
+            if monitoring_control_file and not monitoring_control_file.is_file():
+                # Keep capture current for a live source, but do not compute or persist paused frames.
                 continue
             frame_started = perf_counter()
             # Preserve exact media timestamps for uploaded files. Live sources use wall time.
@@ -321,9 +419,7 @@ def main() -> int:
                 ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 82])
                 if not ok:
                     raise RuntimeError("Unable to encode live annotated frame")
-                image_tmp = publish_dir / "latest.jpg.tmp"
-                image_tmp.write_bytes(encoded.tobytes())
-                image_tmp.replace(publish_dir / "latest.jpg")
+                publish_atomic(publish_dir / "latest.jpg", encoded.tobytes())
                 snapshot = temporal.frame_snapshot() if hasattr(temporal, "frame_snapshot") else None
                 telemetry = {
                     "run_id": run_id, "source": str(args.source), "frame_index": packet.index,
@@ -335,9 +431,7 @@ def main() -> int:
                     "active_review_events": [item.to_dict() for item in events],
                     "new_event_ids": new_event_ids, "cbt_reasoning": snapshot,
                 }
-                json_tmp = publish_dir / "latest.json.tmp"
-                json_tmp.write_text(json.dumps(telemetry), encoding="utf-8")
-                json_tmp.replace(publish_dir / "latest.json")
+                publish_atomic(publish_dir / "latest.json", json.dumps(telemetry).encode("utf-8"))
             if args.display:
                 cv2.imshow("NETRA-4D LIVE", annotated)
                 if cv2.waitKey(1) & 0xFF == ord("q"):

@@ -1,0 +1,19 @@
+source:
+  active: webcam://0
+  file:
+    default_path: data/videos/sample.mp4
+  http:
+    timeout: 10
+    url: http://example.com/stream
+  rtsp:
+    timeout: 10
+    transport: tcp
+    url: rtsp://example.com/stream
+  webcam:
+    device_index: 0
+    height: 720
+    width: 1280
+validation:
+  num_frames: 100
+  save_test_frame: true
+  test_frame_path: outputs/debug/frame_0001.jpg

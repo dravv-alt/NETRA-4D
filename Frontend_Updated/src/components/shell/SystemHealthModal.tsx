@@ -51,11 +51,11 @@ export const SystemHealthModal: React.FC<SystemHealthModalProps> = ({
               </div>
               <div>
                 <h3 className="font-bold text-sm text-neutral-950 uppercase tracking-wider flex items-center gap-2">
-                  <span>Hardware & AI Diagnostics</span>
-                  <StatusBadge status="HEALTHY" label="OPTIMAL" size="sm" />
+                  <span>Controlled Runtime Diagnostics</span>
+                  <StatusBadge status="AVAILABLE" label="DEMO" size="sm" />
                 </h3>
                 <p className="text-2xs text-neutral-500 mt-0.5">
-                  Real-time edge telemetry • NVIDIA T4 Tensor Core Load Profile
+                  Interface sample values; validated GPU provenance is shown in the Validated Run page
                 </p>
               </div>
             </div>

@@ -3,7 +3,8 @@ $root = Split-Path -Parent $PSScriptRoot
 
 $media = Join-Path $root 'tools\mediamtx\mediamtx.exe'
 if (Test-Path -LiteralPath $media) {
-    Start-Process -FilePath $media -ArgumentList (Join-Path $root 'mediamtx.yml') -WorkingDirectory $root -WindowStyle Hidden
+    $mediaConfig = Join-Path $root 'mediamtx.yml'
+    Start-Process -FilePath $media -ArgumentList "`"$mediaConfig`"" -WorkingDirectory $root -WindowStyle Hidden
 }
 
 Start-Process -FilePath 'python' -ArgumentList 'scripts/run_server.py' -WorkingDirectory $root -WindowStyle Hidden

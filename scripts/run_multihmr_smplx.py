@@ -71,10 +71,13 @@ def main() -> int:
     parser.add_argument("--max-frames", type=int, default=30)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs" / "multihmr_smplx")
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--require-cuda", action="store_true")
+    # Multi-HMR's official demo is CUDA-only. Keep this runner strict so a
+    # missing driver cannot silently produce a misleading CPU run.
+    parser.add_argument("--require-cuda", action="store_true", help="Deprecated compatibility flag; CUDA is always required")
     args = parser.parse_args()
-    if args.require_cuda and not torch.cuda.is_available():
-        raise RuntimeError("Multi-HMR CUDA execution was required but is unavailable; no CPU fallback was used.")
+    if not torch.cuda.is_available():
+        raise RuntimeError("Multi-HMR requires CUDA; NVIDIA driver/PyTorch CUDA is unavailable. No CPU fallback is permitted.")
+    torch.cuda.set_device(0)
     if args.sample_every < 1 or args.max_frames < 1:
         raise ValueError("--sample-every and --max-frames must be positive")
     repo, archive = args.repo.resolve(), args.smplx_archive.resolve()

@@ -1,333 +1,56 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, CheckCircle2, CircleAlert, Clock3, FileText, Monitor, ShieldCheck, UserRound, Video, XCircle } from 'lucide-react';
 import { TriagedAIEvent } from '../../types';
 import { StatusBadge } from '../ui/StatusBadge';
 import { ConfidenceBar } from '../ui/ConfidenceBar';
-import {
-  Video,
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  UserCheck,
-  Layers,
-  Compass,
-  ArrowLeft,
-  ChevronDown,
-  Sparkles,
-  LayoutGrid
-} from 'lucide-react';
-import { playHapticSound } from '../../lib/utils';
 import { Button } from '../ui/button';
-import { MultiCamForensicMatrix } from './MultiCamForensicMatrix';
-import { ForensicAdjudicationMatrixMaster } from './ForensicAdjudicationMatrixMaster';
+import { playHapticSound } from '../../lib/utils';
 
 interface EvidenceReviewViewProps {
   event: TriagedAIEvent;
-  onDecision: (
-    eventId: string,
-    decision: 'marked_normal' | 'needs_follow_up' | 'confirmed_violation' | 'escalated',
-    note?: string
-  ) => void;
+  onDecision: (eventId: string, decision: 'marked_normal' | 'needs_follow_up' | 'confirmed_violation' | 'escalated', note?: string) => void;
   onBackToQueue?: () => void;
 }
 
-export const EvidenceReviewView: React.FC<EvidenceReviewViewProps> = ({
-  event,
-  onDecision,
-  onBackToQueue,
-}) => {
-  const [hoveredTime, setHoveredTime] = useState<string | null>(null);
-  const [reviewerNote, setReviewerNote] = useState<string>(event.humanDecision?.notes || '');
-  const [currentDecision, setCurrentDecision] = useState<string | undefined>(event.humanDecision?.status);
-  const [expandedStep, setExpandedStep] = useState<string | null>('ev-1');
-  const [viewTab, setViewTab] = useState<'single' | 'multicam'>('single');
+type DemoAssets = { video: { name: string; url: string } | null; images: { name: string; url: string }[]; logs: { name: string; url: string }[] };
+const decisionLabels = { marked_normal: 'Mark normal', needs_follow_up: 'Needs follow-up', confirmed_violation: 'Confirm violation', escalated: 'Escalate case' } as const;
 
-  const handleApplyDecision = (status: 'marked_normal' | 'needs_follow_up' | 'confirmed_violation' | 'escalated') => {
-    playHapticSound('snap');
-    setCurrentDecision(status);
-    onDecision(event.id, status, reviewerNote);
-  };
+export const EvidenceReviewView: React.FC<EvidenceReviewViewProps> = ({ event, onDecision, onBackToQueue }) => {
+  const api = (import.meta.env.VITE_NETRA_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  const [assets, setAssets] = useState<DemoAssets>({ video: null, images: [], logs: [] });
+  const [log, setLog] = useState<any>(null);
+  const [note, setNote] = useState(event.humanDecision?.notes ?? '');
+  const [decision, setDecision] = useState(event.humanDecision?.status);
 
-  return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
-      {/* 1. STANDARDIZED PAGE HEADER */}
-      <div className="pb-6 border-b border-neutral-200/80">
-        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-neutral-500 mb-2">
-          <ShieldCheck size={13} className="text-neutral-700" />
-          <span>FORENSIC INCIDENT INVESTIGATION • EVIDENCE STACK</span>
-        </div>
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            {onBackToQueue && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  playHapticSound('click');
-                  onBackToQueue();
-                }}
-                className="gap-2 rounded-xl shadow-2xs font-semibold"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to Queue</span>
-              </Button>
-            )}
-            <div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold font-heading text-neutral-950 tracking-tight">
-                Review Event {event.id}
-              </h1>
-              <p className="text-neutral-600 text-sm mt-1.5 max-w-2xl leading-relaxed">
-                Candidate #{event.candidateId} • Terminal {event.seatId} • Flagged at {event.timestamp} IST • Risk Priority: <strong className="text-neutral-950 font-mono">{event.reviewPriority}</strong>
-              </p>
-            </div>
-          </div>
+  useEffect(() => { fetch(`${api}/api/preloaded-demo`).then(r => r.ok ? r.json() : Promise.reject()).then(setAssets).catch(() => undefined); }, [api]);
+  useEffect(() => { if (!assets.logs[0]) return; fetch(`${api}${assets.logs[0].url}`).then(r => r.ok ? r.json() : Promise.reject()).then(setLog).catch(() => undefined); }, [api, assets.logs]);
+  const signals = useMemo(() => event.evidenceStack.length ? event.evidenceStack : [{ id: `${event.id}-signal`, stepNumber: '01', title: 'Temporal review event', description: event.behaviorDisplayTitle, category: 'temporal' as const, confidence: event.aiConfidence, durationSec: event.persistenceSec }], [event]);
+  // These stills are extracted from the same replay video at the event time.
+  // Do not pair unlinked archival alert JPEGs with this event.
+  const replayTimes = useMemo(() => [-1, 0, 1].map(offset => Math.max(0, Math.min(66.64, event.videoTimestampSec + offset))), [event.videoTimestampSec]);
+  const apply = (next: keyof typeof decisionLabels) => { playHapticSound('snap'); setDecision(next); onDecision(event.id, next, note.trim() || undefined); };
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                playHapticSound('click');
-                setViewTab('single');
-              }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-mono font-semibold transition-all cursor-pointer ${
-                viewTab === 'single'
-                  ? 'bg-neutral-900 text-white shadow-xs'
-                  : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              Primary Camera Angle
-            </button>
-            <button
-              onClick={() => {
-                playHapticSound('click');
-                setViewTab('multicam');
-              }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-mono font-semibold transition-all cursor-pointer ${
-                viewTab === 'multicam'
-                  ? 'bg-neutral-900 text-white shadow-xs'
-                  : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              4-Camera Forensic Matrix
-            </button>
-          </div>
-        </div>
+  return <div className="max-w-7xl mx-auto space-y-6 font-sans text-sm text-neutral-900">
+    <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-5"><div className="min-w-0"><div className="mb-3 flex items-center gap-2 text-2xs font-bold uppercase tracking-[0.16em] text-neutral-500"><ShieldCheck size={14} className="text-emerald-700" /> Invigilator evidence review</div><div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-extrabold tracking-tight text-neutral-950">{event.behaviorDisplayTitle}</h1><StatusBadge status={event.severity} /><span className="rounded-full bg-neutral-100 px-3 py-1 text-2xs font-mono font-bold text-neutral-700">{event.reviewPriority} PRIORITY</span></div><p className="mt-2 text-xs leading-relaxed text-neutral-600">Actual preloaded replay, captured alert frames and exported feature logs are shown together with this event's temporal review chain.</p></div>{onBackToQueue && <Button variant="outline" size="sm" onClick={onBackToQueue} className="gap-2 rounded-xl"><ArrowLeft size={14} /> Back to queue</Button>}</div>
+    </section>
+
+    <div className="grid grid-cols-12 gap-6 items-start">
+      <div className="col-span-12 lg:col-span-8 space-y-6">
+        <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-xs"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4"><div className="flex items-center gap-2 font-bold text-neutral-950"><Video size={16} className="text-sky-700" /> Preloaded annotated replay</div><span className="font-mono text-2xs text-neutral-500">EVENT {event.videoTimestampSec.toFixed(3)}s · {event.cameraName}</span></div><div className="aspect-video bg-neutral-950">{assets.video ? <video src={`${api}${assets.video.url}`} controls preload="metadata" onLoadedMetadata={(e) => { e.currentTarget.currentTime = Math.min(event.videoTimestampSec, e.currentTarget.duration || 0); }} className="h-full w-full object-contain" /> : <div className="flex h-full items-center justify-center text-xs text-neutral-400">Loading the supplied demo video…</div>}</div><div className="grid grid-cols-2 divide-x divide-neutral-200 border-t border-neutral-200 text-xs sm:grid-cols-4"><div className="p-4"><span className="block text-neutral-500">Source timestamp</span><strong className="mt-1 block font-mono">{event.videoTimestampSec.toFixed(3)}s</strong></div><div className="p-4"><span className="block text-neutral-500">Persistence</span><strong className="mt-1 block font-mono">{event.persistenceSec.toFixed(2)}s</strong></div><div className="p-4"><span className="block text-neutral-500">Evidence score</span><strong className="mt-1 block font-mono">{(event.aiConfidence * 100).toFixed(0)}%</strong></div><div className="p-4"><span className="block text-neutral-500">Signals</span><strong className="mt-1 block font-mono">{signals.length}</strong></div></div></section>
+
+        <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs sm:p-7"><div className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-4"><div className="flex items-center gap-2 font-bold text-neutral-950"><Clock3 size={16} className="text-amber-600" /> Temporal evidence chain</div><span className="text-2xs text-neutral-500">What persisted before this flag</span></div><div className="mt-5 space-y-3">{signals.map((signal, index) => <div key={signal.id} className="flex gap-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4"><div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-2xs font-bold text-white">{signal.stepNumber || String(index + 1).padStart(2, '0')}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-xs text-neutral-950">{signal.title}</strong><span className="font-mono text-2xs font-bold">{(signal.confidence * 100).toFixed(0)}%</span></div><p className="mt-1 text-xs leading-relaxed text-neutral-600">{signal.description}</p><div className="mt-2 flex gap-4 text-2xs font-mono text-neutral-500"><span>{signal.category}</span><span>{signal.durationSec.toFixed(2)}s</span></div></div></div>)}</div></section>
+
+        <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs sm:p-7"><div className="flex items-center justify-between border-b border-neutral-200 pb-4"><div className="flex items-center gap-2 font-bold text-neutral-950"><FileText size={16} className="text-sky-700" /> Feature-log context</div>{log && <span className="font-mono text-2xs text-neutral-500">{log.total_frames?.toLocaleString()} frames · {Number(log.duration_sec || 0).toFixed(2)}s</span>}</div>{log?.findings?.length ? <div className="mt-4 max-h-64 overflow-y-auto rounded-2xl border border-neutral-200"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-neutral-50 text-2xs uppercase text-neutral-500"><tr><th className="p-3">Frame</th><th>Time</th><th>Seat</th><th>Head</th><th>Hands</th></tr></thead><tbody className="divide-y divide-neutral-100">{log.findings.map((item: any, i: number) => <tr key={`${item.frame}-${i}`}><td className="p-3 font-mono">{item.frame}</td><td className="font-mono">{Number(item.timestamp || 0).toFixed(2)}s</td><td>{item.seat_id || 'Unassigned'}</td><td>{item.head_direction || '—'}</td><td>{item.below_desk ? 'Below desk' : `${item.left_hand || '—'} / ${item.right_hand || '—'}`}</td></tr>)}</tbody></table></div> : <p className="mt-4 text-xs text-neutral-500">Loading the supplied feature-log findings…</p>}</section>
       </div>
 
-      {/* 2. 4-CAMERA MATRIX (IF SELECTED) */}
-      {viewTab === 'multicam' && <MultiCamForensicMatrix />}
+      <aside className="col-span-12 lg:col-span-4 space-y-6">
+        <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs"><div className="flex items-center gap-2 border-b border-neutral-200 pb-4 font-bold text-neutral-950"><Monitor size={16} className="text-sky-700" /> Incident context</div><dl className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-3"><dt className="text-neutral-500">Candidate</dt><dd className="font-bold">#{event.candidateId}</dd></div><div className="flex justify-between gap-3"><dt className="text-neutral-500">Seat / PC</dt><dd className="font-mono font-bold">{event.seatId}</dd></div><div className="flex justify-between gap-3"><dt className="text-neutral-500">Camera</dt><dd className="max-w-[55%] text-right font-semibold">{event.cameraName}</dd></div><div className="flex justify-between gap-3"><dt className="text-neutral-500">Neighbor seat</dt><dd className="font-mono">{event.context.neighborSeatId}</dd></div></dl><div className="mt-5"><ConfidenceBar value={event.aiConfidence} label="Measured evidence score" size="sm" /></div></section>
 
-      {/* 3. FOUR-QUADRANT MASTER GROUPING SYSTEM (REPLICATING REFERENCE ARCHITECTURE) */}
-      <ForensicAdjudicationMatrixMaster
-        onConfirmViolation={() => handleApplyDecision('confirmed_violation')}
-        onDismissAnomaly={() => handleApplyDecision('marked_normal')}
-        onReturnToCockpit={onBackToQueue}
-      />
+        <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs"><div className="flex items-center gap-2 border-b border-neutral-200 pb-4 font-bold text-neutral-950"><FileText size={16} className="text-emerald-700" /> Replay-aligned evidence frames</div><p className="mt-3 text-2xs leading-relaxed text-neutral-500">Extracted directly from the annotated replay at T−1s, event time, and T+1s. These are the only stills paired with this review record.</p><div className="mt-4 grid grid-cols-3 gap-2">{replayTimes.map((timestamp, index) => <div key={timestamp} className="overflow-hidden rounded-xl border border-neutral-200"><img src={`${api}/api/preloaded-demo/replay-frame?timestamp=${timestamp.toFixed(3)}`} alt={`Replay evidence ${timestamp.toFixed(3)} seconds`} className="aspect-video w-full object-cover" /><div className="border-t border-neutral-200 px-2 py-1.5 font-mono text-2xs text-neutral-600">{index === 0 ? 'T−1s' : index === 1 ? 'EVENT' : 'T+1s'} · {timestamp.toFixed(3)}s</div></div>)}</div></section>
 
-      {/* 4. MAIN 2-COLUMN SPLIT VIEW: REPLAY BUFFER & KINEMATIC TIMELINE */}
-      <div className="grid grid-cols-12 gap-8 items-start">
-        {/* LEFT 7 COLS: Video Player & Timeline */}
-        <div className="col-span-12 lg:col-span-7 space-y-6">
-          {/* Synchronized Replay */}
-          {viewTab === 'single' && (
-            <div className="bg-white rounded-[2rem] border border-neutral-200/80 overflow-hidden shadow-[0_20px_40px_rgba(0,0,0,0.035)]">
-              <div className="relative aspect-video bg-neutral-950 flex items-center justify-center">
-                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-neutral-900 flex items-center justify-center text-white mb-4 border border-neutral-800 shadow-md">
-                    <Video size={28} />
-                  </div>
-                  <div className="font-heading font-extrabold text-lg text-white tracking-tight">
-                    Synchronized Anomaly Replay Buffer
-                  </div>
-                  <div className="text-xs text-neutral-400 mt-2 max-w-md leading-relaxed font-sans">
-                    Showing -15.0s ... Flag Frame ({event.timestamp}) ... +15.0s multi-camera temporal buffer.
-                  </div>
-                  <div className="mt-4 flex items-center gap-3 text-xs font-mono">
-                    <span className="px-3.5 py-1.5 rounded-full bg-neutral-900 text-neutral-200 font-bold border border-neutral-800">
-                      Seat {event.seatId} • Candidate #{event.candidateId}
-                    </span>
-                    <span className="px-3.5 py-1.5 rounded-full bg-neutral-900 text-neutral-200 font-bold border border-neutral-800">
-                      Confidence: {(event.aiConfidence * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="absolute top-4 left-4 bg-black/80 px-3.5 py-1.5 rounded-full text-xs text-white font-mono font-bold border border-white/20">
-                  {event.cameraName} • {event.timestamp}.4 IST
-                </div>
-              </div>
-
-              {/* Video Controls Bar */}
-              <div className="p-4 bg-white border-t border-neutral-200 flex items-center justify-between text-xs font-mono">
-                <span className="text-neutral-500">Replay Span: -15.0s to +15.0s (30.0s total)</span>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="xs" onClick={() => playHapticSound('click')} className="rounded-lg">
-                    Step -1 Frame
-                  </Button>
-                  <Button variant="outline" size="xs" onClick={() => playHapticSound('click')} className="rounded-lg">
-                    Step +1 Frame
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* MULTI-TRACK TEMPORAL TIMELINE */}
-          <div className="p-8 space-y-6 bg-white border border-neutral-200/80 shadow-[0_20px_40px_rgba(0,0,0,0.035)] rounded-[2rem]">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-200/80">
-              <div className="font-heading font-bold text-base text-neutral-950 flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100">
-                  <Layers size={16} />
-                </div>
-                <span>Multi-Modal Temporal Kinematics</span>
-              </div>
-              <span className="text-xs font-mono text-neutral-500 font-bold">100ms Ingestion DAG</span>
-            </div>
-
-            {/* 5-Track Visualization */}
-            <div className="space-y-3.5 text-xs">
-              {/* Track 1: Head Gaze */}
-              <div className="flex items-center gap-4">
-                <span className="w-28 text-neutral-600 font-medium">Head Gaze</span>
-                <div
-                  onMouseEnter={() => {
-                    playHapticSound('click');
-                    setHoveredTime('14:32:19.4 | Head yaw: -28° toward lap | Continuity: Optimal');
-                  }}
-                  className="flex-1 h-3.5 bg-neutral-100 rounded-full border border-neutral-200 overflow-hidden relative cursor-pointer"
-                >
-                  <div className="absolute left-[30%] w-[25%] h-full bg-amber-400 rounded-full" />
-                  <div className="absolute left-[65%] w-[18%] h-full bg-amber-400 rounded-full" />
-                </div>
-              </div>
-
-              {/* Track 2: Hands on Laptop */}
-              <div className="flex items-center gap-4">
-                <span className="w-28 text-neutral-600 font-medium">Laptop Hands</span>
-                <div
-                  onMouseEnter={() => {
-                    playHapticSound('click');
-                    setHoveredTime('14:32:20.1 | Right wrist off-keyboard | Duration: 6.2s');
-                  }}
-                  className="flex-1 h-3.5 bg-neutral-100 rounded-full border border-neutral-200 overflow-hidden relative cursor-pointer"
-                >
-                  <div className="absolute left-[20%] w-[45%] h-full bg-rose-400 rounded-full" />
-                </div>
-              </div>
-
-              {/* Track 3: Body Pose & Spine */}
-              <div className="flex items-center gap-4">
-                <span className="w-28 text-neutral-600 font-medium">Body Spine</span>
-                <div
-                  onMouseEnter={() => {
-                    playHapticSound('click');
-                    setHoveredTime('14:32:18.0 | Posture: Nominal upright | Slight forward lean');
-                  }}
-                  className="flex-1 h-3.5 bg-neutral-100 rounded-full border border-neutral-200 overflow-hidden relative cursor-pointer"
-                >
-                  <div className="absolute left-[0%] w-[100%] h-full bg-emerald-300 rounded-full opacity-60" />
-                </div>
-              </div>
-
-              {/* Track 4: Object Detect */}
-              <div className="flex items-center gap-4">
-                <span className="w-28 text-neutral-600 font-medium">Object Detect</span>
-                <div
-                  onMouseEnter={() => {
-                    playHapticSound('click');
-                    setHoveredTime('14:32:21.0 | Phone signature in lap area | Confidence: 74%');
-                  }}
-                  className="flex-1 h-3.5 bg-neutral-100 rounded-full border border-neutral-200 overflow-hidden relative cursor-pointer"
-                >
-                  <div className="absolute left-[35%] w-[15%] h-full bg-rose-500 rounded-full" />
-                </div>
-              </div>
-
-              {/* Track 5: Spatial Context Mask */}
-              <div className="flex items-center gap-4">
-                <span className="w-28 text-neutral-600 font-medium">Spatial Mask</span>
-                <div
-                  onMouseEnter={() => {
-                    playHapticSound('click');
-                    setHoveredTime('14:32:15.0 | Desk polygon: Clear | Adjacent distance: 1.2m');
-                  }}
-                  className="flex-1 h-3.5 bg-neutral-100 rounded-full border border-neutral-200 overflow-hidden relative cursor-pointer"
-                >
-                  <div className="absolute left-[0%] w-[100%] h-full bg-sky-300 rounded-full opacity-50" />
-                </div>
-              </div>
-            </div>
-
-            {/* Hover HUD */}
-            <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 text-2xs font-mono text-neutral-700 min-h-[38px] flex items-center justify-center">
-              {hoveredTime ? hoveredTime : 'Hover over any kinematic track to view sub-second vector telemetry.'}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT 5 COLS: Explainable Evidence Stack */}
-        <div className="col-span-12 lg:col-span-5 space-y-6">
-          <div className="p-7 space-y-5 bg-white border border-neutral-200/80 shadow-[0_20px_40px_rgba(0,0,0,0.035)] rounded-[2rem]">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-200/80">
-              <div className="font-heading font-bold text-base text-neutral-950">
-                Explainable Multi-Modal Evidence Stack
-              </div>
-              <span className="text-2xs font-mono font-bold text-neutral-500">
-                {event.evidenceStack.length} Triggers
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              {event.evidenceStack.map((step) => {
-                const isExpanded = expandedStep === `ev-${step.stepNumber}`;
-                return (
-                  <div
-                    key={step.stepNumber}
-                    className="p-4 rounded-2xl border border-neutral-200/80 bg-neutral-50/60 space-y-2.5 transition-all"
-                  >
-                    <div
-                      onClick={() => {
-                        playHapticSound('click');
-                        setExpandedStep(isExpanded ? null : `ev-${step.stepNumber}`);
-                      }}
-                      className="flex items-center justify-between cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span className="w-6 h-6 rounded-full bg-neutral-900 text-white font-mono text-2xs font-bold flex items-center justify-center">
-                          {step.stepNumber}
-                        </span>
-                        <span className="font-heading font-bold text-xs text-neutral-950">
-                          {step.title}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-2xs font-mono font-bold text-neutral-600">
-                          {(step.confidence * 100).toFixed(0)}%
-                        </span>
-                        <ChevronDown size={14} className={`text-neutral-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </div>
-                    </div>
-
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="pt-2 border-t border-neutral-200/60 text-xs text-neutral-600 space-y-2 leading-relaxed font-sans"
-                      >
-                        <p>{step.description}</p>
-                        <div className="flex items-center justify-between text-3xs font-mono text-neutral-400">
-                          <span>Category: {step.category}</span>
-                          <span>Duration: {step.durationSec}s</span>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
+        <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs"><div className="flex items-center gap-2 border-b border-neutral-200 pb-4 font-bold text-neutral-950"><UserRound size={16} className="text-emerald-700" /> Human decision</div>{decision && decision !== 'pending' && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><CheckCircle2 size={14} className="mr-1 inline" /> Current: <strong>{decisionLabels[decision as keyof typeof decisionLabels]}</strong></div>}<textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Optional invigilator note" className="mt-4 min-h-24 w-full resize-y rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs outline-none focus:border-neutral-900" /><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={() => apply('marked_normal')} className="gap-1 rounded-xl"><XCircle size={13} /> Normal</Button><Button variant="outline" size="sm" onClick={() => apply('needs_follow_up')} className="gap-1 rounded-xl"><FileText size={13} /> Follow-up</Button><Button size="sm" onClick={() => apply('confirmed_violation')} className="gap-1 rounded-xl bg-rose-700 hover:bg-rose-800"><CircleAlert size={13} /> Confirm</Button><Button size="sm" onClick={() => apply('escalated')} className="gap-1 rounded-xl"><ShieldCheck size={13} /> Escalate</Button></div></section>
+      </aside>
     </div>
-  );
+  </div>;
 };

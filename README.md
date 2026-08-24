@@ -120,7 +120,9 @@ shows measured frame/person/object/event counts, downloadable JSONL evidence,
 high-confidence snapshots, and the original source reference. VIDEO_01-03 also
 have hash-verified, browser-compatible unannotated previews in
 `OUTPUT/showcase_inputs`, selectable with the **Source Input / Annotated Output**
-toggle. If a live/upload
+toggle. The selected annotated outputs are served through H.264 browser previews
+in `OUTPUT/showcase_outputs`; the integrity-validated original MP4s remain
+unchanged in their run directories. If a live/upload
 session fails or does not publish its first frame within ten seconds, the player
 automatically switches to the selected verified output instead of going blank.
 

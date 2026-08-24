@@ -1,0 +1,43 @@
+# Watcher Detection Configuration
+# Phase 2: Person and Object Detection
+
+detector:
+  # Model configuration
+  model: "yolov8n.pt"  # Options: yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt, yolov8x.pt
+  # Alternative: "yolo11n.pt" for YOLOv11
+  
+  # Detection thresholds - LOWERED for better small object detection (phones, chits)
+  confidence_threshold: 0.12
+  iou_threshold: 0.45
+  
+  # Classes to detect (COCO class names or indices)
+  # Person = 0, common objects: cell phone=67, laptop=63, book=73, etc.
+  target_classes:
+    - "person"
+    - "cell phone"
+    - "laptop"
+    - "book"
+    - "remote"
+    - "mouse"
+    - "chair"
+    # Add custom classes for chit, watch, earbud when available
+  
+  # Device: "cpu", "cuda", "mps", or "auto"
+  device: "auto"
+  
+  # Image size for inference - 640 for speed, 1280 for accuracy
+  imgsz: 640
+  
+  # Half precision (FP16) for faster inference on GPU
+  half: false
+  
+  # Maximum number of detections per image
+  max_det: 300
+
+# Output settings
+output:
+  draw_boxes: true
+  draw_labels: true
+  draw_confidence: true
+  box_thickness: 2
+  font_scale: 0.6

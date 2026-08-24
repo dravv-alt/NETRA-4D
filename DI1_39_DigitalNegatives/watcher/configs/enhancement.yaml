@@ -1,0 +1,50 @@
+# Watcher Video Quality Enhancement Configuration
+# Phase 1+: Preprocessing for poor lighting/quality frames
+
+enhancement:
+  # Enable/disable enhancement pipeline
+  enabled: true
+  
+  # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+  # Good for improving contrast in low-light or uneven lighting
+  clahe:
+    enabled: true
+    clip_limit: 2.0          # Contrast limiting threshold (higher = more contrast)
+    tile_grid_size: [8, 8]   # Grid size for adaptive equalization
+  
+  # Gamma Correction for brightness adjustment
+  gamma_correction:
+    enabled: true
+    auto_gamma: true         # Automatically calculate gamma from frame brightness
+    target_brightness: 128   # Target mean brightness (0-255)
+    min_gamma: 0.5           # Minimum gamma value
+    max_gamma: 2.0           # Maximum gamma value
+  
+  # Denoising for noise reduction
+  denoising:
+    enabled: true
+    method: "bilateral"  # Options: "fast_nl_means", "bilateral", "gaussian" - bilateral is faster
+    h: 10                    # Filter strength (higher = more denoising)
+    h_color: 10              # Color filter strength
+    template_window: 7       # Template patch size
+    search_window: 21        # Search window size
+
+quality_gate:
+  # Quality assessment gate - flags poor frames but doesn't skip by default
+  enabled: true
+  
+  # Brightness thresholds (0-255)
+  min_brightness: 30
+  max_brightness: 220
+  
+  # Contrast threshold (std deviation)
+  min_contrast: 15
+  
+  # Blur threshold (Laplacian variance - higher = more blur)
+  max_blur_score: 100
+  
+  # Action on poor quality frames:
+  # "flag_only" - mark as poor but still process (recommended)
+  # "enhance_aggressive" - apply stronger enhancement
+  # "skip" - don't process (not recommended for exam monitoring)
+  action_on_poor: "flag_only"

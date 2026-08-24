@@ -22,12 +22,15 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=Path("drishti4d/configs/datasets.json"))
     parser.add_argument("--verified-run", type=Path, default=Path("OUTPUT/netra4d_final_20260823/run.json"))
     parser.add_argument("--output-dir", type=Path, default=Path("OUTPUT/showcase_inputs"))
+    parser.add_argument("--annotated-output-dir", type=Path, default=Path("OUTPUT/showcase_outputs"))
     args = parser.parse_args()
 
     run = json.loads((ROOT / args.verified_run).read_text(encoding="utf-8"))
     verified = {item["asset_id"]: item for item in run["assets"]}
     output_dir = (ROOT / args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    annotated_output_dir = (ROOT / args.annotated_output_dir).resolve()
+    annotated_output_dir.mkdir(parents=True, exist_ok=True)
     records = []
 
     for asset in load_drive_manifest(ROOT / args.manifest)[: args.limit]:
@@ -45,10 +48,23 @@ def main() -> int:
                     ],
                     check=True,
                 )
+        annotated_source = (ROOT / args.verified_run).resolve().parent / asset.asset_id / verified[asset.asset_id]["outputs"]["annotated_video"]
+        annotated_preview = annotated_output_dir / f"{asset.asset_id}_annotated_preview.mp4"
+        if not annotated_preview.is_file():
+            subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(annotated_source),
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
+                    "-an", "-movflags", "+faststart", str(annotated_preview),
+                ],
+                check=True,
+            )
         records.append({
             "asset_id": asset.asset_id, "preview_file": target.name,
             "original_filename": asset.filename, "source_url": asset.source_url,
             "verified_source_sha256": expected["sha256"], "preview_bytes": target.stat().st_size,
+            "annotated_preview_file": annotated_preview.name,
+            "annotated_preview_bytes": annotated_preview.stat().st_size,
             "meaning": "Browser-compatible transcode of the hash-verified original source; no annotations.",
         })
 

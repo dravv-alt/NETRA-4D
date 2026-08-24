@@ -1,95 +1,76 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { PROVIDER_BENCHMARKS, PER_VIDEO_BENCHMARKS } from '../../data/benchmarkData';
-import { StatusBadge } from '../ui/StatusBadge';
-import { FlaskConical, Gauge, Activity, Video } from 'lucide-react';
-import { playHapticSound } from '../../lib/utils';
+import { Activity, CheckCircle2, Database, FileImage, ShieldCheck, Users } from 'lucide-react';
+import { VALIDATED_RUN, VALIDATED_VIDEO_RUNS } from '../../data/benchmarkData';
 import { ParallaxCard } from '../ui/parallax-card';
 
-export const BenchmarkLabView: React.FC = () => {
-  const [selectedVideo, setSelectedVideo] = useState<string>(PER_VIDEO_BENCHMARKS[2].videoId);
-  const activeVideo = PER_VIDEO_BENCHMARKS.find((v) => v.videoId === selectedVideo) || PER_VIDEO_BENCHMARKS[0];
+const number = new Intl.NumberFormat('en-IN');
 
-  const pipelineStages = [
-    { name: 'Video Decode (NVDEC)', latency: '4.2 ms', status: 'HEALTHY' },
-    { name: 'Person Detection (YOLOv8x)', latency: '12.8 ms', status: 'HEALTHY' },
-    { name: 'Multi-Object Tracking (ByteTrack)', latency: '2.1 ms', status: 'HEALTHY' },
-    { name: '2D Pose Estimation (YOLO/RTM)', latency: '8.4 ms', status: 'HEALTHY' },
-    { name: 'Object & Phone Classifier', latency: '4.6 ms', status: 'HEALTHY' },
-    { name: 'Spatial Context & Seat Map', latency: '0.8 ms', status: 'HEALTHY' },
-    { name: 'Temporal Rolling Buffer (12s)', latency: '1.2 ms', status: 'HEALTHY' },
-    { name: 'Multi-Modal Fusion & Triage', latency: '0.6 ms', status: 'HEALTHY' },
+export const BenchmarkLabView: React.FC = () => {
+  const [selectedVideo, setSelectedVideo] = useState(VALIDATED_VIDEO_RUNS[0].assetId);
+  const active = VALIDATED_VIDEO_RUNS.find((video) => video.assetId === selectedVideo) ?? VALIDATED_VIDEO_RUNS[0];
+
+  const summaryCards = [
+    { label: 'Real processed videos', value: VALIDATED_RUN.videos, icon: Database },
+    { label: 'Frames rendered', value: number.format(VALIDATED_RUN.frames), icon: Activity },
+    { label: 'Event-involved track IDs', value: VALIDATED_RUN.eventCandidateTrackIds, icon: Users },
+    { label: 'Temporal review events', value: VALIDATED_RUN.reviewEvents, icon: CheckCircle2 },
+    { label: 'Evidence snapshots', value: VALIDATED_RUN.evidenceStills, icon: FileImage },
+    { label: 'Privacy masks', value: number.format(VALIDATED_RUN.privacyMasks), icon: ShieldCheck },
   ];
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
-      {/* Top Banner */}
-      <div className="flex items-center justify-between pb-4 border-b border-neutral-200">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between pb-5 border-b border-neutral-200">
         <div>
-          <div className="font-bold text-lg text-neutral-950 flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100">
-              <FlaskConical size={18} />
-            </div>
-            <span>Multi-Provider Model Benchmark Lab</span>
-          </div>
-          <div className="text-xs text-neutral-500 mt-1">
-            Empirical evaluation across 8 standardized CCTV clips with real-world ground truth comparison.
-          </div>
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Validated proof of work</div>
+          <h1 className="mt-2 text-2xl font-bold text-neutral-950">Measured Pipeline Run</h1>
+          <p className="mt-1 text-sm text-neutral-500 max-w-3xl">
+            Five genuine CCTV source files processed end to end. Every value below is read from the completed run manifest and JSONL evidence artifacts.
+          </p>
         </div>
-        <div className="text-xs text-neutral-500 text-right">
-          <div>Dataset: <strong className="text-neutral-900">8 CCTV Benchmarks</strong></div>
-          <div>Hardware: <strong className="text-neutral-900">NVIDIA T4 Tensor Core</strong></div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 max-w-sm">
+          <strong>Not an accuracy benchmark.</strong> No reviewed ground truth exists, so F1, precision, recall, and false-positive claims are intentionally omitted.
         </div>
       </div>
 
-      {/* 1. MULTI-PROVIDER COMPARISON MATRIX TABLE */}
-      <div className="bg-white rounded-3xl border border-neutral-200 overflow-hidden shadow-xs">
-        <div className="p-6 bg-neutral-50/80 border-b border-neutral-200 flex items-center justify-between">
-          <div className="font-bold text-base text-neutral-950 flex items-center gap-2.5">
-            <Gauge size={16} className="text-neutral-900" />
-            <span>Architecture & Provider Performance Matrix</span>
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {summaryCards.map(({ label, value, icon: Icon }) => (
+          <div key={label} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xs">
+            <Icon size={16} className="text-emerald-700" />
+            <div className="mt-3 text-xl font-bold tabular-nums text-neutral-950">{value}</div>
+            <div className="mt-1 text-2xs font-semibold uppercase tracking-wide text-neutral-500">{label}</div>
           </div>
-          <span className="text-xs text-neutral-500 font-medium">Single NVIDIA T4 GPU (16GB VRAM)</span>
-        </div>
+        ))}
+      </div>
 
+      <div className="rounded-3xl border border-neutral-200 bg-white overflow-hidden shadow-xs">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-5 border-b border-neutral-200 bg-neutral-50/80">
+          <div>
+            <div className="font-bold text-neutral-950">Per-video measured outputs</div>
+            <div className="text-xs text-neutral-500">Run ID: {VALIDATED_RUN.runId}</div>
+          </div>
+          <div className="text-xs text-neutral-600">{VALIDATED_RUN.sourceDurationSec.toFixed(2)} s source footage · {VALIDATED_RUN.device}</div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-neutral-50/50 text-neutral-500 uppercase border-b border-neutral-200 font-semibold text-2xs tracking-wider">
+          <table className="w-full min-w-[900px] text-xs">
+            <thead className="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
               <tr>
-                <th className="py-3.5 px-6">Provider Architecture</th>
-                <th className="py-3.5 px-6">Pipeline Role</th>
-                <th className="py-3.5 px-6">Test Coverage</th>
-                <th className="py-3.5 px-6">Event F1</th>
-                <th className="py-3.5 px-6">FP / Min</th>
-                <th className="py-3.5 px-6">Inference FPS</th>
-                <th className="py-3.5 px-6">VRAM Load</th>
-                <th className="py-3.5 px-6">Status</th>
+                <th className="px-5 py-3 text-left">Video</th><th className="px-4 py-3 text-right">Frames</th>
+                <th className="px-4 py-3 text-right">Duration</th><th className="px-4 py-3 text-right">Event track IDs</th>
+                <th className="px-4 py-3 text-right">Events</th><th className="px-4 py-3 text-right">Evidence</th>
+                <th className="px-4 py-3 text-right">Runtime</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-200/80">
-              {PROVIDER_BENCHMARKS.map((row, idx) => (
-                <tr
-                  key={idx}
-                  className={`hover:bg-neutral-50 transition-colors ${
-                    row.providerName.includes('Fusion') ? 'bg-neutral-50/90 font-bold text-neutral-950' : ''
-                  }`}
-                >
-                  <td className="py-4 px-6 font-bold text-neutral-950">
-                    {row.providerName}
-                  </td>
-                  <td className="py-4 px-6 text-neutral-600 font-medium">{row.role}</td>
-                  <td className="py-4 px-6 text-neutral-500 font-mono tabular-nums">{row.videosTested}</td>
-                  <td className="py-4 px-6 text-neutral-950 font-bold font-mono tabular-nums">{row.eventF1}</td>
-                  <td className="py-4 px-6 text-neutral-900 font-mono tabular-nums">{row.fpPerMin}</td>
-                  <td className="py-4 px-6 text-emerald-700 font-bold font-mono tabular-nums">{row.fps}</td>
-                  <td className="py-4 px-6 text-neutral-500 font-mono tabular-nums">{row.vramGb}</td>
-                  <td className="py-4 px-6">
-                    <StatusBadge
-                      status={row.status === 'PRIMARY' ? 'HEALTHY' : row.status === 'REFINEMENT' ? 'AVAILABLE' : 'ON_DEMAND'}
-                      label={row.status}
-                      size="sm"
-                    />
-                  </td>
+            <tbody className="divide-y divide-neutral-100">
+              {VALIDATED_VIDEO_RUNS.map((video) => (
+                <tr key={video.assetId} className="hover:bg-neutral-50">
+                  <td className="px-5 py-4"><button className="text-left" onClick={() => setSelectedVideo(video.assetId)}><strong className="text-neutral-950">{video.assetId}</strong><span className="block max-w-[360px] truncate text-neutral-500">{video.filename}</span></button></td>
+                  <td className="px-4 py-4 text-right font-mono">{number.format(video.frames)}</td>
+                  <td className="px-4 py-4 text-right font-mono">{video.durationSec.toFixed(2)}s</td>
+                  <td className="px-4 py-4 text-right font-mono">{video.eventCandidateTrackIds}</td>
+                  <td className="px-4 py-4 text-right font-mono font-bold">{video.reviewEvents}</td>
+                  <td className="px-4 py-4 text-right font-mono font-bold text-emerald-700">{video.evidenceStills}</td>
+                  <td className="px-4 py-4 text-right font-mono">{video.inferenceRuntimeSec.toFixed(1)}s</td>
                 </tr>
               ))}
             </tbody>
@@ -97,139 +78,52 @@ export const BenchmarkLabView: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. PER-VIDEO DETAILED BENCHMARK INSPECTOR */}
-      <div className="grid grid-cols-12 gap-8 items-start">
-        {/* Left 4 Cols: Video Test Cases Selector */}
-        <div className="col-span-12 lg:col-span-4 space-y-3">
-          <div className="text-2xs uppercase text-neutral-400 font-bold tracking-wider px-1">
-            Standardized CCTV Clips (8 Benchmarks)
-          </div>
-          <div className="space-y-2">
-            {PER_VIDEO_BENCHMARKS.map((vid) => {
-              const isSelected = selectedVideo === vid.videoId;
-              return (
-                <button
-                  key={vid.videoId}
-                  onClick={() => {
-                    playHapticSound('click');
-                    setSelectedVideo(vid.videoId);
-                  }}
-                  className={`w-full p-4 rounded-2xl text-left transition-all border cursor-pointer ${
-                    isSelected
-                      ? 'bg-neutral-900 text-white border-neutral-900 shadow-md font-semibold'
-                      : 'bg-white text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50 border-neutral-200 shadow-2xs'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-2xs mb-1">
-                    <span className="font-bold">{vid.videoId}</span>
-                    <span className={`font-mono tabular-nums ${isSelected ? 'text-neutral-300' : 'text-neutral-400'}`}>{vid.fps} FPS • {vid.durationSec}s</span>
-                  </div>
-                  <div className={`text-sm truncate font-bold ${isSelected ? 'text-white' : 'text-neutral-950'}`}>
-                    {vid.filename}
-                  </div>
-                  <div className={`text-2xs truncate mt-1 ${isSelected ? 'text-neutral-300' : 'text-neutral-500'}`}>
-                    {vid.notes}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      <div className="grid grid-cols-12 gap-7 items-start">
+        <div className="col-span-12 lg:col-span-4 space-y-2">
+          <div className="px-1 text-2xs uppercase tracking-widest font-bold text-neutral-400">Validated CCTV sources (5)</div>
+          {VALIDATED_VIDEO_RUNS.map((video) => (
+            <button key={video.assetId} onClick={() => setSelectedVideo(video.assetId)} className={`w-full rounded-2xl border p-4 text-left transition-colors ${selectedVideo === video.assetId ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-200 bg-white hover:bg-neutral-50'}`}>
+              <div className="flex justify-between text-2xs font-bold"><span>{video.assetId}</span><span>{video.sourceFps.toFixed(2)} FPS · {video.durationSec.toFixed(1)}s</span></div>
+              <div className="mt-1 truncate text-xs font-semibold">{video.filename}</div>
+            </button>
+          ))}
         </div>
 
-        {/* Right 8 Cols: Active Video Metric Deep-Dive */}
-        <div className="col-span-12 lg:col-span-8 space-y-6">
-          <ParallaxCard tiltAngle={2} className="p-8 space-y-6 bg-white border border-neutral-200 shadow-xs rounded-3xl">
-            {/* Header of Active Video */}
-            <div className="flex items-center justify-between pb-4 border-b border-neutral-200">
-              <div>
-                <span className="font-bold text-base text-neutral-950">{activeVideo.videoId}: {activeVideo.filename}</span>
-                <div className="text-xs text-neutral-500 mt-1">
-                  Resolution: {activeVideo.resolution} • Base FPS: {activeVideo.fps} • Duration: {activeVideo.durationSec}s
-                </div>
-              </div>
-              <span className="px-3.5 py-1.5 rounded-full bg-neutral-100 text-neutral-900 text-xs font-bold border border-neutral-200">
-                {activeVideo.groundTruthEvents}
-              </span>
+        <div className="col-span-12 lg:col-span-8 min-w-0">
+          <ParallaxCard tiltAngle={1.5} className="rounded-3xl border border-neutral-200 bg-white p-7 shadow-xs">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pb-5 border-b border-neutral-200">
+            <div><div className="text-lg font-bold text-neutral-950">{active.assetId}</div><div className="mt-1 text-xs text-neutral-500">{active.filename}</div></div>
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">{active.calibration.replaceAll('_', ' ')}</span>
             </div>
 
-            {/* Provider Breakdown Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-1.5">
-                <div className="font-bold text-xs text-neutral-800 uppercase">YOLO-Pose</div>
-                <div className="text-sm text-neutral-950 font-mono font-bold">Frames: {activeVideo.yoloMetrics.frames}</div>
-                <div className="text-2xs text-neutral-500 font-mono">Tracks: {activeVideo.yoloMetrics.tracks} | VRAM: {activeVideo.yoloMetrics.vram}</div>
-                <div className="text-xs text-emerald-700 font-bold font-mono">{activeVideo.yoloMetrics.fps} FPS Avg</div>
-              </div>
-
-              <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-1.5">
-                <div className="font-bold text-xs text-neutral-800 uppercase">RTMPose Refine</div>
-                <div className="text-sm text-neutral-950 font-mono font-bold">Frames: {activeVideo.rtmposeMetrics.frames}</div>
-                <div className="text-2xs text-neutral-500 font-mono">Tracks: {activeVideo.rtmposeMetrics.tracks} | VRAM: {activeVideo.rtmposeMetrics.vram}</div>
-                <div className="text-xs text-emerald-700 font-bold font-mono">{activeVideo.rtmposeMetrics.fps} FPS Avg</div>
-              </div>
-
-              <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-1.5">
-                <div className="font-bold text-xs text-neutral-800 uppercase">Multi-HMR 3D</div>
-                <div className="text-sm text-neutral-950 font-mono font-bold">Frames: {activeVideo.multiHmrMetrics.frames}</div>
-                <div className="text-2xs text-neutral-500 font-mono">Tracks: {activeVideo.multiHmrMetrics.tracks} | VRAM: {activeVideo.multiHmrMetrics.vram}</div>
-                <div className="text-xs text-neutral-900 font-bold font-mono">{activeVideo.multiHmrMetrics.fps > 0 ? `${activeVideo.multiHmrMetrics.fps} FPS` : 'On-Demand'}</div>
-              </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 py-5">
+            {[
+              ['Frame integrity', `${number.format(active.decodedFrames)} decoded / ${number.format(active.frames)} rendered`],
+              ['Person observations', number.format(active.personObservations)],
+              ['Object observations', number.format(active.objectObservations)],
+              ['Gaze proxy known', number.format(active.gazeProxyObservations)],
+              ['Privacy masks', number.format(active.privacyMasks)],
+              ['Temporal persistence', `${active.temporalDurationSec.toFixed(2)} s summed`],
+              ['Longest event', `${active.maxEventDurationSec.toFixed(2)} s`],
+              ['Evidence frames', String(active.evidenceStills)],
+            ].map(([label, value]) => <div key={label} className="rounded-xl bg-neutral-50 p-3 border border-neutral-100"><div className="text-2xs uppercase font-bold tracking-wide text-neutral-400">{label}</div><div className="mt-1 text-xs font-bold text-neutral-950">{value}</div></div>)}
             </div>
 
-            {/* Event Accuracy & Overlap Card */}
-            <div className="bg-neutral-50 p-5 rounded-2xl space-y-3 border border-neutral-200">
-              <div className="font-bold text-xs text-neutral-950 uppercase tracking-wider flex items-center justify-between">
-                <span>Evaluation Results & Ground Truth Match</span>
-                <span className="text-xs text-neutral-900 font-bold px-3 py-1 rounded-full bg-white border border-neutral-300">
-                  {activeVideo.overlap}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-xs pt-3 border-t border-neutral-200">
-                <div>
-                  <span className="text-neutral-500">Predicted: </span>
-                  <strong className="text-neutral-950 font-bold font-mono">{activeVideo.predictedEvents}</strong>
-                </div>
-                <div>
-                  <span className="text-neutral-500">Ground Truth: </span>
-                  <strong className="text-neutral-950 font-bold font-mono">{activeVideo.groundTruthEvents}</strong>
-                </div>
-                <div>
-                  <span className="text-neutral-500">False Alerts: </span>
-                  <strong className="text-neutral-950 font-bold font-mono">{activeVideo.falseAlerts}</strong>
-                </div>
-              </div>
+            <div className="rounded-2xl border border-neutral-200 p-5">
+            <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Observed temporal event types</div>
+            {active.eventTypes.length ? <div className="mt-3 flex flex-wrap gap-2">{active.eventTypes.map((event) => <span key={event} className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-semibold text-neutral-700">{event}</span>)}</div> : <p className="mt-3 text-sm text-neutral-500">No review event crossed the configured temporal activation rules in this video.</p>}
             </div>
+            <p className="mt-4 text-2xs leading-relaxed text-neutral-500">
+            Candidate values are session-local ByteTrack IDs involved in review events, not biometric identity counts. {active.decodeFailures > 0 ? `${active.assetId} contains ${active.decodeFailures} red diagnostic decode-failure frames` : `${active.assetId} completed with no decode failures`}; source pixels were not fabricated or duplicated.
+            </p>
           </ParallaxCard>
         </div>
       </div>
 
-      {/* 3. PIPELINE LATENCY DAG */}
-      <div className="bg-white p-8 space-y-5 rounded-3xl border border-neutral-200 shadow-xs">
-        <div className="flex items-center justify-between pb-3 border-b border-neutral-200">
-          <div className="font-bold text-base text-neutral-950 flex items-center gap-2.5">
-            <Activity size={16} className="text-neutral-900" />
-            <span>End-to-End Pipeline DAG Latency Profile</span>
-          </div>
-          <span className="text-xs text-emerald-800 font-bold px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200">
-            Total Latency: 34.7 ms
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          {pipelineStages.map((stage, idx) => (
-            <div key={idx} className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-1.5 shadow-2xs">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-neutral-400 font-mono">0{idx + 1}</span>
-                <StatusBadge status={stage.status as any} size="sm" />
-              </div>
-              <div className="text-xs font-bold text-neutral-950 truncate">{stage.name}</div>
-              <div className="text-xs text-neutral-500 font-mono tabular-nums pt-2 border-t border-neutral-200 flex items-center justify-between">
-                <span>Latency:</span>
-                <strong className="text-neutral-950 font-bold">{stage.latency}</strong>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="rounded-3xl border border-neutral-200 bg-neutral-950 p-6 text-neutral-100">
+        <div className="font-bold">Scientific boundary</div>
+        <p className="mt-2 text-xs leading-relaxed text-neutral-300">The run proves source-to-output execution, temporal logging, privacy masking, candidate/PC context, evidence capture, and artifact integrity. It does not prove misconduct-classification accuracy. At the strict COCO cell-phone threshold, the run retained {VALIDATED_RUN.phoneStillsAtStrictThreshold} raw phone stills; possible-phone and possible-chit labels remain review proxies.</p>
+        <div className="mt-3 text-2xs text-neutral-400">Runtime: {VALIDATED_RUN.device} · Torch {VALIDATED_RUN.torch} · Python {VALIDATED_RUN.python}</div>
       </div>
     </div>
   );

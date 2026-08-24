@@ -18,7 +18,6 @@ import {
   Radio,
   SlidersHorizontal,
   Clock,
-  Layers,
   Terminal,
   PanelBottom,
   Search,
@@ -26,7 +25,8 @@ import {
   Compass,
   AlertCircle,
   Eye,
-  Shield
+  Shield,
+  Download
 } from 'lucide-react';
 import { SystemHealthModal } from './SystemHealthModal';
 import { MagneticDock, DockItemData } from '../ui/magnetic-dock';
@@ -41,8 +41,7 @@ export type NavigationTab =
   | 'cases'
   | 'analytics'
   | 'system-cameras'
-  | 'benchmark'
-  | 'design-system';
+  | 'benchmark';
 
 interface AppShellProps {
   activeTab: NavigationTab | string;
@@ -70,6 +69,30 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [demoMenuOpen, setDemoMenuOpen] = useState(false);
   const [showFloatingDock, setShowFloatingDock] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [reportStatus, setReportStatus] = useState<'idle' | 'loading' | 'saved' | 'error'>('idle');
+
+  const getReport = async () => {
+    const apiBase = (import.meta.env.VITE_NETRA_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+    setReportStatus('loading');
+    try {
+      const response = await fetch(`${apiBase}/api/reports/operations`);
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'NETRA_4D_Operational_Report.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setReportStatus('saved');
+      window.setTimeout(() => setReportStatus('idle'), 2500);
+    } catch {
+      setReportStatus('error');
+      window.setTimeout(() => setReportStatus('idle'), 3500);
+    }
+  };
 
   const navOperations = [
     {
@@ -125,14 +148,8 @@ export const AppShell: React.FC<AppShellProps> = ({
     },
     {
       id: 'benchmark',
-      label: 'Benchmark Lab',
+      label: 'Validated Run',
       icon: <FlaskConical size={16} />,
-      badge: undefined,
-    },
-    {
-      id: 'design-system',
-      label: 'Design Tokens',
-      icon: <Layers size={16} />,
       badge: undefined,
     },
   ];
@@ -154,7 +171,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     { id: 'preset-counter', title: '3. Wall Timer Look (Candidate #3)', seat: 'Seat A03 (Suppressed)', type: 'Observe' },
     { id: 'preset-hard-negative', title: '4. Mouse Hard-Negative Check', seat: 'Seat A04 (Suppressed)', type: 'Observe' },
     { id: 'preset-peer', title: '5. Peer Paper Transfer (Candidate #18)', seat: 'Seat B08 & B09', type: 'Escalated' },
-    { id: 'preset-benchmark', title: '6. Multi-Provider Benchmarks', seat: '8 CCTV Footage Clips', type: 'Lab' },
+    { id: 'preset-benchmark', title: '6. Validated Pipeline Evidence', seat: '5 CCTV Source Videos', type: 'Measured Run' },
   ];
 
   return (
@@ -183,7 +200,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 className="overflow-hidden min-w-0"
               >
                 <div className="font-heading font-extrabold tracking-tight text-sm text-neutral-950 flex items-center gap-2">
-                  <span>DRISHTI</span>
+                  <span>NETRA-4D</span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-full">
                     v2.4
                   </span>
@@ -328,7 +345,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               className="w-full py-2 px-3 rounded-xl bg-white hover:bg-neutral-100 border border-neutral-200/80 text-neutral-900 text-xs font-sans font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-2xs"
             >
               <Cpu size={14} className="text-neutral-700" />
-              <span>NVIDIA T4 Diagnostics</span>
+              <span>Runtime Diagnostics</span>
             </button>
           </motion.div>
         ) : (
@@ -339,7 +356,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 setIsHealthOpen(true);
               }}
               className="w-10 h-10 rounded-2xl bg-neutral-100 hover:bg-neutral-200 text-neutral-700 flex items-center justify-center cursor-pointer transition-colors relative"
-              title="NVIDIA T4 GPU Diagnostics"
+              title="Runtime Diagnostics"
             >
               <Cpu size={16} />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
@@ -358,13 +375,24 @@ export const AppShell: React.FC<AppShellProps> = ({
               <span>Surveillance Grid Synchronized</span>
             </div>
             <div className="hidden md:flex items-center gap-2 text-xs text-neutral-500 font-mono">
-              <span>{health.pipelineLatencyMs}ms DAG Latency</span>
-              <span>•</span>
-              <span>{health.t4GpuUtilPct}% GPU Load</span>
+              <span>API-linked live monitor</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => {
+                playHapticSound('snap');
+                void getReport();
+              }}
+              disabled={reportStatus === 'loading'}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-black disabled:opacity-60 text-white text-xs font-sans font-semibold border border-neutral-900 shadow-2xs transition-colors cursor-pointer"
+              title="Download the operational run, event log, temporal metrics, and evidence summary"
+            >
+              <Download size={13} />
+              <span>{reportStatus === 'loading' ? 'Building…' : reportStatus === 'saved' ? 'Report Saved' : reportStatus === 'error' ? 'Retry Report' : 'Get Report'}</span>
+            </button>
+
             {/* Dock Visibility Toggle */}
             <button
               onClick={() => {
@@ -444,7 +472,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-mono font-semibold text-neutral-800 border border-neutral-200 transition-colors cursor-pointer"
             >
               <Cpu size={13} />
-              <span>NVIDIA T4</span>
+              <span>Pipeline Runtime</span>
             </button>
           </div>
         </header>

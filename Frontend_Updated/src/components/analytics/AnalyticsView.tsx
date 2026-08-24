@@ -51,7 +51,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               Cohort Telemetry & Kinematic Intelligence
             </h1>
             <p className="text-neutral-600 text-sm mt-1.5 max-w-2xl leading-relaxed">
-              Longitudinal behavioral trails, 3D LiDAR digital twin, spatial gaze attention convergence, proctor patrol radar, and ambient acoustic monitoring.
+              Longitudinal behavioral trails, candidate-to-PC context, temporal gaze proxies, interaction evidence, proctor coverage, and live pipeline health.
             </p>
           </div>
           <span className="text-xs font-mono font-bold text-neutral-900 px-3.5 py-1.5 rounded-full bg-white border border-neutral-200 shadow-2xs">
@@ -123,7 +123,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* MASTER SUITE 2: SPATIAL 3D DIGITAL TWIN & AISLE PATROL RADAR SUITE */}
+      {/* MASTER SUITE 2: CANDIDATE-PC CONTEXT & AISLE PATROL SUITE */}
       {/* ========================================================================= */}
       <div className="space-y-8">
         <SpatialHallDigitalTwin seats={seats} onSelectSeat={onSelectCandidate} />
@@ -131,7 +131,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* MASTER SUITE 3: MULTI-MODAL BIOMETRIC & ACOUSTIC TELEMETRY DECK */}
+      {/* MASTER SUITE 3: POSTURE, PIPELINE, AND TEMPORAL TELEMETRY */}
       {/* ========================================================================= */}
       <div className="space-y-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

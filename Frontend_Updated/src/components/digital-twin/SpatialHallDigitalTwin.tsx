@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { animate, stagger } from 'animejs';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Compass,
@@ -33,36 +32,12 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
   onSelectSeat,
   selectedSeatId,
 }) => {
-  const [viewMode, setViewMode] = useState<'isometric' | 'rays' | 'frustum' | 'lidar'>('isometric');
+  const [viewMode, setViewMode] = useState<'assignments' | 'attention' | 'interactions' | 'evidence'>('assignments');
   const [activeSeat, setActiveSeat] = useState<string | null>(selectedSeatId || 'A06');
-  const [cameraAngle, setCameraAngle] = useState<number>(25);
-  const lidarPointsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (selectedSeatId) setActiveSeat(selectedSeatId);
   }, [selectedSeatId]);
-
-  // Anime.js LiDAR Scan & Beam Pulse Animation
-  useEffect(() => {
-    if (!lidarPointsRef.current) return;
-
-    const lidarDots = lidarPointsRef.current.querySelectorAll('.lidar-dot');
-    if (!lidarDots || lidarDots.length === 0) return;
-
-    const anim = animate(lidarDots, {
-      scale: [0.94, 1.06],
-      opacity: [0.75, 1],
-      ease: 'easeInOutSine',
-      duration: 1000,
-      delay: stagger(50),
-      loop: true,
-      alternate: true,
-    });
-
-    return () => {
-      anim.revert();
-    };
-  }, [viewMode]);
 
   const rowA = seats.filter((s) => s.gridPosition.row === 'A');
   const rowB = seats.filter((s) => s.gridPosition.row === 'B');
@@ -79,20 +54,20 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
               <Compass size={18} />
             </div>
             <h3 className="font-heading font-extrabold text-xl text-neutral-950 tracking-tight">
-              Spatial LiDAR & 3D Digital Twin Visualizer
+              Candidate–PC Context & Interaction Map
             </h3>
             <span className="text-3xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-              ANIME.JS 3D ENGINE
+              CBT TEMPORAL CONTEXT
             </span>
           </div>
           <p className="text-xs text-neutral-500 mt-1">
-            Real-time 3D spatial homography, gaze vector projections, and camera frustum intersections across the 20-terminal computer lab.
+            Candidate assignments, associated screens, head-direction proxies, pairwise interactions, and human-review evidence across the examination lab.
           </p>
         </div>
 
         {/* View Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          {(['isometric', 'rays', 'frustum', 'lidar'] as const).map((mode) => (
+          {(['assignments', 'attention', 'interactions', 'evidence'] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => {
@@ -105,39 +80,39 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
                   : 'bg-neutral-100 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200'
               }`}
             >
-              {mode === 'isometric' && '🛰️ 3D Isometric'}
-              {mode === 'rays' && '👁️ Gaze Vector Rays'}
-              {mode === 'frustum' && '📐 Camera Frustums'}
-              {mode === 'lidar' && '⚡ LiDAR Pointcloud'}
+              {mode === 'assignments' && 'Candidate ↔ PC'}
+              {mode === 'attention' && 'Head Direction'}
+              {mode === 'interactions' && 'Human Interaction'}
+              {mode === 'evidence' && 'Evidence State'}
             </button>
           ))}
         </div>
       </div>
 
-      {/* 3D Canvas Viewport */}
+      {/* Candidate-workstation context viewport */}
       <div className="relative aspect-21/9 min-h-[360px] bg-[#1A1918] rounded-3xl border border-neutral-900 overflow-hidden shadow-inner flex flex-col justify-between p-6 select-none">
         {/* Top HUD Overlay */}
         <div className="flex items-center justify-between z-10 text-2xs font-mono text-neutral-400">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              DIGITAL TWIN ENGINE ACTIVE
+              TEMPORAL CONTEXT ENGINE ACTIVE
             </span>
             <span>•</span>
-            <span>Pitch: {cameraAngle}°</span>
+            <span>Assigned seats and screens</span>
             <span>•</span>
-            <span>Spatial Error: 0.04m RMS</span>
+            <span>Human review required</span>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-1 rounded-lg bg-white/10 text-white border border-white/15">
-              CAM-01 / CAM-02 / CAM-03 / CAM-04 SYNCHRONIZED
+              CANDIDATE • PC • GAZE PROXY • INTERACTION
             </span>
           </div>
         </div>
 
-        {/* ISOMETRIC 3D LAB SCENE */}
-        <div ref={lidarPointsRef} className="my-auto w-full max-w-5xl mx-auto py-2">
+        {/* Contextual examination-lab map */}
+        <div className="my-auto w-full max-w-5xl mx-auto py-2">
           {/* North Desk (Row A - Facing North ⬆) */}
           <div className="space-y-2">
             <div className="text-3xs font-mono font-bold uppercase tracking-widest text-sky-400/80 text-center">
@@ -159,7 +134,7 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
                       onSelectSeat?.(seat.id);
                     }}
                     whileHover={{ scale: 1.08, y: -4 }}
-                    className={`lidar-dot relative p-2.5 rounded-xl border transition-all cursor-pointer text-center font-mono ${
+                    className={`relative p-2.5 rounded-xl border transition-all cursor-pointer text-center font-mono ${
                       isSelected
                         ? 'bg-white text-neutral-950 border-white shadow-lg ring-2 ring-sky-400'
                         : isEscalated
@@ -176,7 +151,7 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
                     <div className="text-3xs text-neutral-400">#{seat.candidateId}</div>
 
                     {/* Dynamic Vector Ray Visualizer */}
-                    {viewMode === 'rays' && (
+                    {viewMode === 'attention' && (
                       <div className="mt-1.5 flex justify-center">
                         <div
                           className={`w-1 h-3.5 rounded-full ${
@@ -220,7 +195,7 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
                       onSelectSeat?.(seat.id);
                     }}
                     whileHover={{ scale: 1.08, y: 4 }}
-                    className={`lidar-dot relative p-2.5 rounded-xl border transition-all cursor-pointer text-center font-mono ${
+                    className={`relative p-2.5 rounded-xl border transition-all cursor-pointer text-center font-mono ${
                       isSelected
                         ? 'bg-white text-neutral-950 border-white shadow-lg ring-2 ring-sky-400'
                         : isEscalated
@@ -231,7 +206,7 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
                     }`}
                   >
                     {/* Dynamic Vector Ray Visualizer */}
-                    {viewMode === 'rays' && (
+                    {viewMode === 'attention' && (
                       <div className="mb-1.5 flex justify-center">
                         <div
                           className={`w-1 h-3.5 rounded-full ${
@@ -267,9 +242,9 @@ export const SpatialHallDigitalTwin: React.FC<SpatialHallDigitalTwinProps> = ({
           <div className="flex items-center gap-3">
             <span className="font-bold text-sky-300">Selected Node: Terminal {selectedSeatData.id} (Candidate #{selectedSeatData.candidateId})</span>
             <span className="text-neutral-400">•</span>
-            <span>Vector Pitch: <strong className="text-emerald-400">-18.4°</strong></span>
+            <span>Track: <strong className="text-emerald-400">{selectedSeatData.telemetry.trackContinuity}</strong></span>
             <span>•</span>
-            <span>Yaw Deviation: <strong className="text-amber-300">+28.2°</strong></span>
+            <span>Hands: <strong className="text-amber-300">{selectedSeatData.telemetry.handsEvidence}</strong></span>
           </div>
 
           <div className="flex items-center gap-2">
