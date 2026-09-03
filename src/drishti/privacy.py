@@ -3,6 +3,11 @@
 The available pose model provides COCO facial keypoints, not iris landmarks.
 Consequently this module reports a *gaze proxy* (2-D head direction inferred
 from nose/eye geometry), never eye-tracking or a true gaze estimate.
+
+Mask geometry is angle-adaptive: it degrades gracefully through tiers as
+facial keypoints drop out (frontal -> three-quarter/profile -> hard profile
+-> back-facing -> unknown), so a profile-view head gets a rotated ellipse
+fit to its actual roll instead of a generic axis-aligned blob.
 """
 
 from __future__ import annotations
@@ -12,6 +17,15 @@ from typing import Any
 
 import cv2
 import numpy as np
+
+_COCO_NAMES = [
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle",
+]
+
+Point = tuple[float, float, float]  # (x, y, confidence)
 
 
 @dataclass(frozen=True)
@@ -23,22 +37,21 @@ class PrivacyAnnotation:
     gaze_proxy_confidence: float
 
 
-def _point(person: Any, name: str, width: int, height: int, min_confidence: float) -> tuple[float, float, float] | None:
+# ---------------------------------------------------------------------------
+# Keypoint access (unchanged public behavior; supports both attribute-style
+# and dict-style person records)
+# ---------------------------------------------------------------------------
+
+def _point(person: Any, name: str, width: int, height: int, min_confidence: float) -> Point | None:
     kpts = getattr(person, "keypoints_2d", None) or getattr(person, "keypoints", None)
     if isinstance(kpts, dict):
-        point = kpts.get(name)
-        if point is not None and getattr(point, "confidence", 0.0) >= min_confidence:
-            return point.x * width, point.y * height, point.confidence
+        pt = kpts.get(name)
+        if pt is not None and getattr(pt, "confidence", 0.0) >= min_confidence:
+            return pt.x * width, pt.y * height, pt.confidence
     elif isinstance(person, dict) and person.get("keypoints") is not None:
         kp_arr = person["keypoints"]
-        COCO_NAMES = [
-            "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-            "left_wrist", "right_wrist", "left_hip", "right_hip",
-            "left_knee", "right_knee", "left_ankle", "right_ankle"
-        ]
-        if name in COCO_NAMES:
-            idx = COCO_NAMES.index(name)
+        if name in _COCO_NAMES:
+            idx = _COCO_NAMES.index(name)
             if idx < len(kp_arr) and kp_arr[idx][2] >= min_confidence:
                 return float(kp_arr[idx][0]), float(kp_arr[idx][1]), float(kp_arr[idx][2])
     return None
@@ -54,15 +67,29 @@ def _clamp_box(box: tuple[float, float, float, float], width: int, height: int) 
     )
 
 
+def _bbox_of(person: Any, width: int, height: int) -> tuple[float, float, float, float]:
+    if hasattr(person, "bbox_xyxy_px"):
+        return person.bbox_xyxy_px
+    if hasattr(person, "bbox_xyxy_norm"):
+        b = person.bbox_xyxy_norm
+        return b[0] * width, b[1] * height, b[2] * width, b[3] * height
+    if isinstance(person, dict) and "bbox" in person:
+        return tuple(person["bbox"])
+    return 0.0, 0.0, 0.0, 0.0
+
+
+# ---------------------------------------------------------------------------
+# Public: conservative face region for annotation placement (unchanged)
+# ---------------------------------------------------------------------------
+
 def face_region_from_pose(person: Any, width: int, height: int, *, min_confidence: float = 0.25) -> tuple[tuple[int, int, int, int], str]:
     """Return a conservative face/head mask based only on pose or person box."""
-
     facial = [
-        point for name in ("nose", "left_eye", "right_eye", "left_ear", "right_ear")
-        if (point := _point(person, name, width, height, min_confidence)) is not None
+        pt for name in ("nose", "left_eye", "right_eye", "left_ear", "right_ear")
+        if (pt := _point(person, name, width, height, min_confidence)) is not None
     ]
     if len(facial) >= 2:
-        xs, ys = [item[0] for item in facial], [item[1] for item in facial]
+        xs, ys = [p[0] for p in facial], [p[1] for p in facial]
         span = max(max(xs) - min(xs), max(ys) - min(ys), 12.0)
         padding_x, padding_y = span * 0.75, span * 1.05
         return _clamp_box(
@@ -70,28 +97,22 @@ def face_region_from_pose(person: Any, width: int, height: int, *, min_confidenc
             width, height,
         ), "pose_facial_keypoints"
 
-    if hasattr(person, "bbox_xyxy_px"):
-        x1, y1, x2, y2 = person.bbox_xyxy_px
-    elif hasattr(person, "bbox_xyxy_norm"):
-        b = person.bbox_xyxy_norm
-        x1, y1, x2, y2 = b[0] * width, b[1] * height, b[2] * width, b[3] * height
-    elif isinstance(person, dict) and "bbox" in person:
-        x1, y1, x2, y2 = person["bbox"]
-    else:
-        x1, y1, x2, y2 = 0.0, 0.0, 0.0, 0.0
-
+    x1, y1, x2, y2 = _bbox_of(person, width, height)
     person_height = max(float(y2) - float(y1), 1.0)
     # Privacy fallback covers the likely head region; it does not assert a face was detected.
     return _clamp_box((x1, y1, x2, y1 + person_height * 0.35), width, height), "person_head_region_fallback"
 
 
+# ---------------------------------------------------------------------------
+# Public: gaze proxy (pure keypoint geometry, unchanged)
+# ---------------------------------------------------------------------------
+
 def gaze_proxy_from_pose(person: Any, width: int, height: int, *, min_confidence: float = 0.25) -> tuple[str, float]:
     """Estimate 2-D head direction from real eye/nose pose keypoints.
 
-    This is deliberately conservative: without both eyes and a nose, the
-    result is UNKNOWN. It must not be interpreted as iris/eye gaze tracking.
+    Deliberately conservative: without both eyes and a nose, the result is
+    UNKNOWN. This is a head-direction proxy, not iris/eye gaze tracking.
     """
-
     left = _point(person, "left_eye", width, height, min_confidence)
     right = _point(person, "right_eye", width, height, min_confidence)
     nose = _point(person, "nose", width, height, min_confidence)
@@ -110,30 +131,156 @@ def gaze_proxy_from_pose(person: Any, width: int, height: int, *, min_confidence
     return "FORWARD", confidence
 
 
+# ---------------------------------------------------------------------------
+# Tiered, angle-adaptive face geometry
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _FaceGeometry:
+    center: tuple[float, float]
+    axis_x: int
+    axis_y: int
+    angle_deg: float
+    tier: str
+
+
+def _roll_from_vector(dx: float, dy: float) -> float:
+    """Map any directed line to a roll angle in (-90, 90] degrees.
+
+    Using atan2 directly would flip sign depending on which side of the face
+    supplied the line (left eye->ear vs right eye->ear point in opposite
+    x-directions). Folding into a half-turn range makes the ellipse rotation
+    consistent regardless of which side's keypoints happened to be visible.
+    """
+    angle = float(np.degrees(np.arctan2(dy, dx)))
+    if angle > 90.0:
+        angle -= 180.0
+    elif angle < -90.0:
+        angle += 180.0
+    return angle
+
+
+def _face_geometry(
+    nose: Point | None,
+    leye: Point | None,
+    reye: Point | None,
+    lear: Point | None,
+    rear: Point | None,
+    bw: float,
+) -> _FaceGeometry | None:
+    """Tiered angle-adaptive face ellipse geometry.
+
+    Tier 1 (frontal): both eyes visible -> eye line gives roll directly.
+    Tier 2 (three-quarter/profile): one eye + its same-side ear -> eye-ear
+        line approximates roll (eye and ear sit on a near-horizontal line
+        across yaw, unlike the eye-eye line which disappears in profile).
+    Tier 3 (hard profile / eye occluded): nose + an ear -> nose-ear line as
+        a last-resort roll estimate.
+    Tier 4 (one eye + nose, ear missing/occluded): nose-eye line as a
+        weaker roll estimate.
+    Tier 5 (nose only, or eyes/ears with no nose): no orientation cue ->
+        axis-aligned ellipse.
+    """
+    cranial = [p for p in (nose, leye, reye, lear, rear) if p is not None]
+    if not cranial:
+        return None
+
+    fc_x = float(np.mean([p[0] for p in cranial]))
+    fc_y = float(np.mean([p[1] for p in cranial]))
+
+    if leye is not None and reye is not None:
+        eye_dist = max(float(np.hypot(reye[0] - leye[0], reye[1] - leye[1])), bw * 0.16)
+        angle_deg = _roll_from_vector(reye[0] - leye[0], reye[1] - leye[1])
+        tier = "frontal"
+    elif (leye is not None and lear is not None) or (reye is not None and rear is not None):
+        eye, ear = (leye, lear) if (leye is not None and lear is not None) else (reye, rear)
+        angle_deg = _roll_from_vector(ear[0] - eye[0], ear[1] - eye[1])
+        eye_dist = bw * 0.20
+        tier = "profile_eye_ear"
+    elif nose is not None and (lear is not None or rear is not None):
+        ear = lear if lear is not None else rear
+        angle_deg = _roll_from_vector(ear[0] - nose[0], ear[1] - nose[1])
+        eye_dist = bw * 0.20
+        tier = "nose_ear"
+    elif nose is not None and (leye is not None or reye is not None):
+        # One eye + nose, no matching ear (e.g. ear occluded by hair) --
+        # weaker than the eye-ear line but still better than defaulting to 0.
+        eye = leye if leye is not None else reye
+        angle_deg = _roll_from_vector(nose[0] - eye[0], nose[1] - eye[1])
+        eye_dist = bw * 0.20
+        tier = "nose_eye"
+    else:
+        angle_deg = 0.0
+        eye_dist = bw * 0.20
+        tier = "sparse"
+
+    axis_x = int(max(6.0, eye_dist * 1.25))
+    axis_y = int(max(8.0, eye_dist * 1.50))
+
+    if nose is not None and (leye is not None or reye is not None):
+        mid_eye_y = (
+            (leye[1] + reye[1]) / 2.0 if (leye is not None and reye is not None)
+            else (leye[1] if leye is not None else reye[1])
+        )
+        fc_y += (nose[1] - mid_eye_y) * 0.35
+
+    return _FaceGeometry((fc_x, fc_y), axis_x, axis_y, angle_deg, tier)
+
+
+def _draw_face_mask(person_mask: np.ndarray, geom: _FaceGeometry, leye: Point | None, reye: Point | None,
+                     lsh: Point | None, rsh: Point | None, eye_dist_hint: float) -> None:
+    fc_x, fc_y = geom.center
+    cv2.ellipse(person_mask, (int(fc_x), int(fc_y)), (geom.axis_x, geom.axis_y), geom.angle_deg, 0, 360, 255, -1)
+
+    # --- Preserve eyes for gaze tracking (whatever eye(s) are visible) ---
+    eye_radius = int(max(3.0, eye_dist_hint * 0.32))
+    if leye is not None:
+        cv2.circle(person_mask, (int(leye[0]), int(leye[1])), eye_radius, 0, -1)
+    if reye is not None:
+        cv2.circle(person_mask, (int(reye[0]), int(reye[1])), eye_radius, 0, -1)
+    if leye is not None and reye is not None:
+        mid_eye = (int((leye[0] + reye[0]) / 2.0), int((leye[1] + reye[1]) / 2.0))
+        cv2.ellipse(person_mask, mid_eye, (int(eye_dist_hint * 0.55), int(eye_radius * 0.75)), geom.angle_deg, 0, 360, 0, -1)
+
+    # --- Preserve neck: strictly exclude neck/collar region ---
+    if lsh is not None and rsh is not None:
+        sh_mid_y = (lsh[1] + rsh[1]) / 2.0
+        chin_y = fc_y + geom.axis_y * 0.75
+        if sh_mid_y > chin_y:
+            neck_poly = np.array([
+                [int(fc_x - geom.axis_x * 1.5), int(chin_y)],
+                [int(fc_x + geom.axis_x * 1.5), int(chin_y)],
+                [int(rsh[0]), int(rsh[1])],
+                [int(lsh[0]), int(lsh[1])],
+            ], dtype=np.int32)
+            cv2.fillPoly(person_mask, [neck_poly], 0)
+
+
 def build_adaptive_face_mask(height: int, width: int, people: list[Any], min_confidence: float = 0.15) -> np.ndarray:
     """
-    Constructs an angle-adaptive face-contour mask that covers the face boundary
-    for privacy protection while preserving the eyes (for gaze tracking) and neck.
+    Constructs an angle-adaptive face-contour mask that hugs the face boundary
+    for privacy protection while preserving the eyes (for gaze tracking) and
+    neck, across frontal, three-quarter, profile, and back-facing views.
     Returns a single-channel uint8 mask (0 = sharp/preserve, 255 = blur).
     """
     mask = np.zeros((height, width), dtype=np.uint8)
+
     for person in people:
         person_mask = np.zeros((height, width), dtype=np.uint8)
 
-        # Extract bounding box
-        bx = getattr(person, "bbox_xyxy_px", None)
-        if bx is None and hasattr(person, "bbox_xyxy_norm"):
-            b = person.bbox_xyxy_norm
-            bx = (b[0] * width, b[1] * height, b[2] * width, b[3] * height)
-        elif bx is None and isinstance(person, dict) and "bbox" in person:
-            bx = person["bbox"]
-        elif bx is None:
+        has_bbox_source = (
+            hasattr(person, "bbox_xyxy_px")
+            or hasattr(person, "bbox_xyxy_norm")
+            or (isinstance(person, dict) and "bbox" in person)
+        )
+        if not has_bbox_source:
+            # No bbox at all -- matches the original behavior of skipping
+            # this person rather than guessing a degenerate zero-sized box.
             continue
-
+        bx = _bbox_of(person, width, height)
         bw = max(10.0, float(bx[2] - bx[0]))
         bh = max(10.0, float(bx[3] - bx[1]))
 
-        # Keypoints
         nose = _point(person, "nose", width, height, min_confidence)
         leye = _point(person, "left_eye", width, height, min_confidence)
         reye = _point(person, "right_eye", width, height, min_confidence)
@@ -142,69 +289,30 @@ def build_adaptive_face_mask(height: int, width: int, people: list[Any], min_con
         lsh = _point(person, "left_shoulder", width, height, min_confidence)
         rsh = _point(person, "right_shoulder", width, height, min_confidence)
 
-        has_nose = nose is not None
-        has_leye = leye is not None
-        has_reye = reye is not None
-        has_eyes = has_leye or has_reye
+        has_facial_cue = nose is not None or leye is not None or reye is not None
         has_shoulders = lsh is not None and rsh is not None
 
-        if has_eyes or has_nose:
-            cranial_pts = [p[:2] for p in [nose, leye, reye, lear, rear] if p is not None]
-            fc_x = float(np.mean([p[0] for p in cranial_pts]))
-            fc_y = float(np.mean([p[1] for p in cranial_pts]))
-
-            if has_leye and has_reye:
-                eye_dist = float(np.hypot(reye[0] - leye[0], reye[1] - leye[1]))
-                eye_dist = max(eye_dist, bw * 0.16)
-                angle_deg = float(np.degrees(np.arctan2(reye[1] - leye[1], reye[0] - leye[0])))
-            else:
-                eye_dist = bw * 0.20
-                angle_deg = 0.0
-
-            # Proportional face ellipse: tightly contours cheeks, mouth, jaw
-            axis_x = int(max(6.0, eye_dist * 1.25))
-            axis_y = int(max(8.0, eye_dist * 1.50))
-
-            if has_nose and has_eyes:
-                mid_eye_y = (leye[1] + reye[1]) / 2.0 if (has_leye and has_reye) else (leye[1] if has_leye else reye[1])
-                fc_y += (nose[1] - mid_eye_y) * 0.35
-
-            cv2.ellipse(person_mask, (int(fc_x), int(fc_y)), (axis_x, axis_y), angle_deg, 0, 360, 255, -1)
-
-            # Preserve eyes for gaze tracking
-            eye_radius = int(max(3.0, eye_dist * 0.32))
-            if has_leye:
-                cv2.circle(person_mask, (int(leye[0]), int(leye[1])), eye_radius, 0, -1)
-            if has_reye:
-                cv2.circle(person_mask, (int(reye[0]), int(reye[1])), eye_radius, 0, -1)
-            if has_leye and has_reye:
-                mid_eye = (int((leye[0] + reye[0]) / 2.0), int((leye[1] + reye[1]) / 2.0))
-                cv2.ellipse(person_mask, mid_eye, (int(eye_dist * 0.55), int(eye_radius * 0.75)), angle_deg, 0, 360, 0, -1)
-
-            # Preserve neck
-            if has_shoulders:
-                sh_mid_y = (lsh[1] + rsh[1]) / 2.0
-                chin_y = fc_y + axis_y * 0.75
-                if sh_mid_y > chin_y:
-                    neck_poly = np.array([
-                        [int(fc_x - axis_x * 1.5), int(chin_y)],
-                        [int(fc_x + axis_x * 1.5), int(chin_y)],
-                        [int(rsh[0]), int(rsh[1])],
-                        [int(lsh[0]), int(lsh[1])]
-                    ], dtype=np.int32)
-                    cv2.fillPoly(person_mask, [neck_poly], 0)
+        if has_facial_cue:
+            geom = _face_geometry(nose, leye, reye, lear, rear, bw)
+            eye_dist_hint = (
+                float(np.hypot(reye[0] - leye[0], reye[1] - leye[1])) if (leye is not None and reye is not None)
+                else bw * 0.20
+            )
+            _draw_face_mask(person_mask, geom, leye, reye, lsh, rsh, eye_dist_hint)
         elif has_shoulders:
-            # Back-facing: cranial cap centered above shoulders
+            # Back-facing: cranial cap centered above shoulders, rotated to
+            # match shoulder tilt instead of always sitting axis-aligned.
             sh_mid_x = (lsh[0] + rsh[0]) / 2.0
             sh_mid_y = (lsh[1] + rsh[1]) / 2.0
             sh_span = float(np.hypot(rsh[0] - lsh[0], rsh[1] - lsh[1]))
+            shoulder_angle = _roll_from_vector(rsh[0] - lsh[0], rsh[1] - lsh[1])
             head_x = int(sh_mid_x)
             head_y = int(sh_mid_y - sh_span * 0.48)
-            cw = int(sh_span * 0.26)
-            ch = int(sh_span * 0.30)
-            cv2.ellipse(person_mask, (head_x, head_y), (cw, ch), 0, 0, 360, 255, -1)
+            cw = int(max(6.0, sh_span * 0.26))
+            ch = int(max(8.0, sh_span * 0.30))
+            cv2.ellipse(person_mask, (head_x, head_y), (cw, ch), shoulder_angle, 0, 360, 255, -1)
         else:
-            # Fallback when keypoints are missing (top 28% of box)
+            # Zero-keypoint fallback: top slice of the person bbox.
             cw = int(bw * 0.35)
             ch = int(bh * 0.20)
             cx = int((bx[0] + bx[2]) / 2.0)
@@ -212,8 +320,13 @@ def build_adaptive_face_mask(height: int, width: int, people: list[Any], min_con
             cv2.ellipse(person_mask, (cx, cy), (cw, ch), 0, 0, 360, 255, -1)
 
         mask = cv2.bitwise_or(mask, person_mask)
+
     return mask
 
+
+# ---------------------------------------------------------------------------
+# Public: full pipeline
+# ---------------------------------------------------------------------------
 
 def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> tuple[np.ndarray, list[PrivacyAnnotation]]:
     """Compute gaze first, blur face boundary second (preserving eyes and neck), return records for final overlay."""
@@ -243,17 +356,14 @@ def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[A
             gaze_proxy_confidence=gaze_confidence,
         ))
 
-    # Construct angle-adaptive face-contour mask (preserves eyes and neck)
     mask = build_adaptive_face_mask(height, width, people, min_confidence=min_keypoint_confidence)
 
     if np.any(mask > 0):
-        # Create full-frame heavy dual-stage blur (pixelated + Gaussian)
         sw, sh = max(4, width // 25), max(4, height // 25)
         small = cv2.resize(frame, (sw, sh), interpolation=cv2.INTER_LINEAR)
         pixelated = cv2.resize(small, (width, height), interpolation=cv2.INTER_NEAREST)
         blurred_frame = cv2.GaussianBlur(pixelated, (31, 31), 0)
 
-        # Smooth feathered alpha blend
         mask_feathered = cv2.GaussianBlur(mask, (15, 15), 0)
         alpha = (mask_feathered.astype(np.float32) / 255.0)[:, :, np.newaxis]
         masked = (alpha * blurred_frame.astype(np.float32) + (1.0 - alpha) * frame.astype(np.float32)).astype(np.uint8)
