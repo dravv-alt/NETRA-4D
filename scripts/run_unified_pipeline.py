@@ -86,6 +86,10 @@ from drishti.engine.escalation import (
     EscalationGate,
     EscalationStage,
 )
+from drishti.engine.specialists import (
+    MediaPipeHandRunner,
+    RTMPoseONNXRunner,
+)
 
 # Multi-HMR & SMPL-X for Stage 3 deep 3D analysis
 from utils import normalize_rgb, get_focalLength_from_fieldOfView
@@ -180,16 +184,23 @@ def run_unified_pipeline(
     competing_hypothesis_engine = CompetingHypothesisEngine()
     state_machines: Dict[str, CandidateStateMachine] = {}
     specialist_crop_analyzer = SpecialistHandCropAnalyzer(crop_size=256)
+    rtmpose_specialist = RTMPoseONNXRunner()
+    mediapipe_specialist = MediaPipeHandRunner()
     escalation_gate = EscalationGate()
 
-    # Wire Stage 2 Specialist crop analyzer into EscalationGate
+    # Wire Stage 2 Specialists into EscalationGate
     def stage2_crop_runner(crops):
         if not crops:
             return None
-        # Evaluate primary crop
         return specialist_crop_analyzer.analyze_crop(crops[0], (crops[0].shape[1]//2, crops[0].shape[0]//2))
 
     escalation_gate.stage2_crop_analyzer = stage2_crop_runner
+    if rtmpose_specialist.is_available:
+        escalation_gate.stage2_rtmpose_verifier = rtmpose_specialist.infer_crop
+        print("[NETRA-4D] Stage 2 RTM-Pose ONNX Specialist active.")
+    if mediapipe_specialist.is_available:
+        escalation_gate.stage2_mediapipe_verifier = mediapipe_specialist.infer_hand
+        print("[NETRA-4D] Stage 2 MediaPipe 3D Hand Specialist active.")
 
     # =========================================================================
     # 2. Load Vision Models
@@ -451,19 +462,29 @@ def run_unified_pipeline(
                             if escalation_gate.should_escalate_to_stage2(eval_result):
                                 # Stage 2 Specialist Crop Extraction
                                 bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
+                                cand_crop = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
+                                hand_crops = []
+                                wrist_pixel_loc = None
                                 if lw and rw:
                                     lw_n = (lw.x, lw.y)
                                     rw_n = (rw.x, rw.y)
-                                    crops = specialist_crop_analyzer.extract_wrist_crops(frame, lw_n, rw_n)
-                                    if crops:
-                                        res2 = specialist_crop_analyzer.analyze_crop(crops[0][0], crops[0][1])
-                                        if res2.is_suspicious:
-                                            specialist_finding = res2
-                                            eval_result.suspicion_score = max(eval_result.suspicion_score, res2.confidence)
-                                            eval_result.uncertainty_score = max(0.05, eval_result.uncertainty_score * 0.40)
-                                            eval_result.supporting_evidence.append(res2.evidence_desc)
-                                            # Draw Stage 2 detection circle
-                                            cv2.circle(rendered_frame, crops[0][1], 24, (0, 0, 255), 2, cv2.LINE_AA)
+                                    wrist_crops_meta = specialist_crop_analyzer.extract_wrist_crops(frame, lw_n, rw_n)
+                                    if wrist_crops_meta:
+                                        hand_crops = [item[0] for item in wrist_crops_meta]
+                                        wrist_pixel_loc = wrist_crops_meta[0][1]
+
+                                res2 = escalation_gate.evaluate_stage2_specialists(
+                                    candidate_id=cand_id,
+                                    evaluation=eval_result,
+                                    candidate_crop_bgr=cand_crop,
+                                    hand_crops_bgr=hand_crops
+                                )
+                                eval_result.suspicion_score = res2.resolved_suspicion
+                                eval_result.uncertainty_score = res2.resolved_uncertainty
+                                eval_result.supporting_evidence.extend(res2.supporting_findings)
+                                eval_result.counter_evidence.extend(res2.counter_findings)
+                                if wrist_pixel_loc and res2.resolved_suspicion >= 0.60:
+                                    cv2.circle(rendered_frame, wrist_pixel_loc, 24, (0, 0, 255), 2, cv2.LINE_AA)
 
                             # Candidate Behavioural State Machine Update
                             if cand_id not in state_machines:

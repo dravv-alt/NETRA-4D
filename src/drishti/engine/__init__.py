@@ -73,6 +73,10 @@ from .escalation import (
     EscalationStage,
     SpecialistResolutionResult,
 )
+from .specialists import (
+    MediaPipeHandRunner,
+    RTMPoseONNXRunner,
+)
 
 __all__ = [
     "HandLandmarksObservation",
@@ -122,4 +126,6 @@ __all__ = [
     "EscalationGate",
     "EscalationStage",
     "SpecialistResolutionResult",
+    "MediaPipeHandRunner",
+    "RTMPoseONNXRunner",
 ]

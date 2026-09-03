@@ -228,6 +228,45 @@ class RTMPoseAdapter:
     """Converts RTM-Pose coordinate classification (SimCC) outputs into VisionObservations."""
 
     @classmethod
+    def decode_simcc(
+        cls,
+        simcc_x: np.ndarray,
+        simcc_y: np.ndarray,
+        crop_shape: Tuple[int, int],
+        simcc_split_ratio: float = 2.0,
+    ) -> List[NormalizedKeypoint]:
+        """Decodes SimCC 1D probability representations into normalized keypoints."""
+        ch, cw = crop_shape[:2]
+        # simcc_x: (1, 17, W_simcc), simcc_y: (1, 17, H_simcc)
+        sx = simcc_x[0] if simcc_x.ndim == 3 else simcc_x
+        sy = simcc_y[0] if simcc_y.ndim == 3 else simcc_y
+        num_kps = sx.shape[0]
+
+        keypoints = []
+        for i in range(num_kps):
+            kname = YOLO26Adapter.COCO_KEYPOINT_NAMES[i] if i < len(YOLO26Adapter.COCO_KEYPOINT_NAMES) else f"kp_{i}"
+            loc_x = float(np.argmax(sx[i])) / simcc_split_ratio
+            loc_y = float(np.argmax(sy[i])) / simcc_split_ratio
+
+            # Softmax peak confidence proxy
+            max_sx = float(np.max(sx[i]))
+            max_sy = float(np.max(sy[i]))
+            conf = float(np.clip((max_sx + max_sy) / 2.0, 0.0, 1.0))
+
+            # Normalize to [0.0, 1.0] relative to original crop
+            norm_x = float(np.clip(loc_x / max(1.0, float(cw)), 0.0, 1.0))
+            norm_y = float(np.clip(loc_y / max(1.0, float(ch)), 0.0, 1.0))
+
+            keypoints.append(NormalizedKeypoint(
+                name=kname,
+                x=norm_x,
+                y=norm_y,
+                confidence=conf,
+                visibility=float(conf > 0.20)
+            ))
+        return keypoints
+
+    @classmethod
     def adapt(
         cls,
         frame_idx: int,

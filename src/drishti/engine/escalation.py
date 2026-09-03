@@ -90,12 +90,34 @@ class EscalationGate:
                 resolved_s = max(0.0, resolved_s * 0.50)
                 resolved_u = max(0.05, resolved_u * 0.50)
 
-        # 2. RTM-Pose Micro-Angle Verification if crop provided
+        # 2. MediaPipe Hand 3D Landmark & Pinch Analysis
+        if hand_crops_bgr and self.stage2_mediapipe_verifier is not None:
+            mp_res = self.stage2_mediapipe_verifier(hand_crops_bgr[0])
+            if mp_res is not None:
+                measurements["mediapipe_hand_3d"] = len(mp_res.landmarks_21_3d)
+                # Compute pinch distance between thumb tip (idx 4) and index tip (idx 8)
+                lms = mp_res.landmarks_21_3d
+                if len(lms) >= 9:
+                    thumb_tip = np.array(lms[4][:2])
+                    index_tip = np.array(lms[8][:2])
+                    pinch_dist = float(np.linalg.norm(thumb_tip - index_tip))
+                    measurements["pinch_distance"] = round(pinch_dist, 4)
+                    if pinch_dist < 0.22:
+                        supporting.append(f"Stage 2 MediaPipe confirmed precision pinch grasp (dist: {pinch_dist:.2f})")
+                        resolved_s = max(resolved_s, 0.70)
+                        resolved_u = max(0.05, resolved_u * 0.35)
+                    else:
+                        counter.append(f"Stage 2 MediaPipe confirmed open hand relaxation (pinch dist: {pinch_dist:.2f})")
+                        resolved_s = max(0.0, resolved_s * 0.60)
+                        resolved_u = max(0.05, resolved_u * 0.40)
+
+        # 3. RTM-Pose SimCC Sub-Pixel Micro-Angle Verification
         if candidate_crop_bgr is not None and self.stage2_rtmpose_verifier is not None:
-            rtm_res = self.stage2_rtmpose_verifier(candidate_crop_bgr)
-            measurements["rtmpose_simcc"] = rtm_res
-            # SimCC coordinate classification resolves joint ambiguity
-            resolved_u = max(0.05, resolved_u * 0.50)
+            rtm_kpts = self.stage2_rtmpose_verifier(candidate_crop_bgr)
+            if rtm_kpts:
+                measurements["rtmpose_simcc_kpts"] = len(rtm_kpts)
+                resolved_u = max(0.05, resolved_u * 0.40)  # SimCC coordinate classification resolves joint ambiguity
+                supporting.append("Stage 2 RTM-Pose SimCC resolved sub-pixel joint coordinates")
 
         # Determine if resolved
         is_resolved = (resolved_u < self.uncertainty_escalation_threshold)
