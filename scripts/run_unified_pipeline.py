@@ -352,7 +352,7 @@ def run_unified_pipeline(
                         # -------------------------------------------------------------
                         needs_stage3 = (
                             frame_idx < 15 or
-                            any(s.state in {CandidateBehaviouralState.REVIEW, CandidateBehaviouralState.HIGH_PRIORITY_REVIEW} for s in active_candidates.values())
+                            any(sm.current_state in {CandidateBehaviouralState.REVIEW, CandidateBehaviouralState.HIGH_PRIORITY_REVIEW} for sm in state_machines.values())
                         )
                         humans_3d = None
                         if needs_stage3:
@@ -544,11 +544,10 @@ def run_unified_pipeline(
                                 cv2.line(rendered_frame, (int(anc_cx * width), int(anc_cy * height)), (int(((sb[0] + sb[2])/2.0) * width), int(sb[3] * height)), (0, 180, 220), 1, cv2.LINE_AA)
                             else:
                                 dz = semantic_zone_engine.candidate_desk_zones.get(cand_id)
-                                if dz is not None:
-                                    dx1, dy1 = int(dz[0] * width), int(dz[1] * height)
-                                    dx2, dy2 = int(dz[2] * width), int(dz[3] * height)
-                                    cv2.rectangle(rendered_frame, (dx1, dy1), (dx2, dy2), (140, 160, 180), 1, cv2.LINE_AA)
-                                    cv2.putText(rendered_frame, f"{desk_id} Desk", (dx1 + 3, max(12, dy1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (140, 160, 180), 1, cv2.LINE_AA)
+                                if dz is not None and dz.points:
+                                    pts = np.array([[int(p[0] * width), int(p[1] * height)] for p in dz.points], dtype=np.int32)
+                                    cv2.polylines(rendered_frame, [pts], isClosed=True, color=(140, 160, 180), thickness=1, lineType=cv2.LINE_AA)
+                                    cv2.putText(rendered_frame, f"{desk_id} Desk", (pts[0][0] + 3, max(12, pts[0][1] - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (140, 160, 180), 1, cv2.LINE_AA)
 
                             # -------------------------------------------------------------
                             # G. Visual Overlays (Selective & Privacy Safe)
