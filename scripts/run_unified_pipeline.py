@@ -346,17 +346,26 @@ def run_unified_pipeline(
                             semantic_zone_engine.auto_infer_neighbours()
 
                         # -------------------------------------------------------------
-                        # D. Multi-HMR 3D Mesh Extraction (Stage 3 Preparedness)
+                        # D. Multi-HMR 3D Mesh Extraction (Stage 3 Deep Analysis)
+                        # Conditionally invoked per ARCHITECTURE.md Section 4.5 & 5.4:
+                        # Warmup calibration frames or when any candidate is in REVIEW / HIGH_PRIORITY_REVIEW
                         # -------------------------------------------------------------
-                        x, transform_meta = preprocess_frame_for_hmr(frame, img_size, device=device)
-                        humans_3d = hmr_model(x, is_training=False, nms_kernel_size=1, det_thresh=0.3, K=K)
-                        scale, pad_x, pad_y = transform_meta
+                        needs_stage3 = (
+                            frame_idx < 15 or
+                            any(s.state in {CandidateBehaviouralState.REVIEW, CandidateBehaviouralState.HIGH_PRIORITY_REVIEW} for s in active_candidates.values())
+                        )
+                        humans_3d = None
+                        if needs_stage3:
+                            x, transform_meta = preprocess_frame_for_hmr(frame, img_size, device=device)
+                            humans_3d = hmr_model(x, is_training=False, nms_kernel_size=1, det_thresh=0.3, K=K)
+                            scale, pad_x, pad_y = transform_meta
 
                         # -------------------------------------------------------------
                         # E. Temporal Behavioral Engine & Arbitration (Layer 3 & 4)
                         # -------------------------------------------------------------
                         rendered_frame = frame.copy()
                         frame_audit_records = []
+                        gaze_rays_to_draw = []
 
                         for cand_id, state in active_candidates.items():
                             if state.identity.is_invigilator:
@@ -511,6 +520,37 @@ def run_unified_pipeline(
                                     cv2.polylines(rendered_frame, pts_triangles, isClosed=True, color=(0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
 
                             # -------------------------------------------------------------
+                            # F. Screen & Workstation Desk Mapping (Layer 1 & 2)
+                            # -------------------------------------------------------------
+                            anc_cx, anc_cy = state.identity.anchor_center_norm
+                            anc_bw, anc_bh = state.identity.anchor_box_size_norm
+                            assigned_screen = None
+                            min_sdist = 0.35
+                            for obj in detected_objects:
+                                if obj.is_static:
+                                    ox = (obj.bbox_xyxy_norm[0] + obj.bbox_xyxy_norm[2]) / 2.0
+                                    oy = (obj.bbox_xyxy_norm[1] + obj.bbox_xyxy_norm[3]) / 2.0
+                                    d = float(np.hypot(anc_cx - ox, anc_cy - oy))
+                                    if d < min_sdist:
+                                        min_sdist = d
+                                        assigned_screen = obj
+
+                            if assigned_screen is not None:
+                                sb = assigned_screen.bbox_xyxy_norm
+                                sx1, sy1 = int(sb[0] * width), int(sb[1] * height)
+                                sx2, sy2 = int(sb[2] * width), int(sb[3] * height)
+                                cv2.rectangle(rendered_frame, (sx1, sy1), (sx2, sy2), (0, 215, 255), 1, cv2.LINE_AA)
+                                cv2.putText(rendered_frame, f"{desk_id} Screen", (sx1 + 3, max(12, sy1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 215, 255), 1, cv2.LINE_AA)
+                                cv2.line(rendered_frame, (int(anc_cx * width), int(anc_cy * height)), (int(((sb[0] + sb[2])/2.0) * width), int(sb[3] * height)), (0, 180, 220), 1, cv2.LINE_AA)
+                            else:
+                                dz = semantic_zone_engine.candidate_desk_zones.get(cand_id)
+                                if dz is not None:
+                                    dx1, dy1 = int(dz[0] * width), int(dz[1] * height)
+                                    dx2, dy2 = int(dz[2] * width), int(dz[3] * height)
+                                    cv2.rectangle(rendered_frame, (dx1, dy1), (dx2, dy2), (140, 160, 180), 1, cv2.LINE_AA)
+                                    cv2.putText(rendered_frame, f"{desk_id} Desk", (dx1 + 3, max(12, dy1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (140, 160, 180), 1, cv2.LINE_AA)
+
+                            # -------------------------------------------------------------
                             # G. Visual Overlays (Selective & Privacy Safe)
                             # -------------------------------------------------------------
                             color = PALETTE_BGR[hash(cand_id) % len(PALETTE_BGR)]
@@ -550,19 +590,66 @@ def run_unified_pipeline(
                                     cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 3, (255, 255, 255), -1, cv2.LINE_AA)
                                     cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 2, color, -1, cv2.LINE_AA)
 
+                            # Gaze Direction Vector (Layer 3 & 4 Section 5.4)
+                            leye = obs.get_keypoint("left_eye")
+                            reye = obs.get_keypoint("right_eye")
+                            if (leye and leye.confidence > 0.15) or (reye and reye.confidence > 0.15):
+                                if leye and reye and leye.confidence > 0.15 and reye.confidence > 0.15:
+                                    em_x, em_y = (leye.x + reye.x) / 2.0, (leye.y + reye.y) / 2.0
+                                    e_span = float(np.hypot(reye.x - leye.x, reye.y - leye.y))
+                                elif leye and leye.confidence > 0.15:
+                                    em_x, em_y = leye.x, leye.y
+                                    e_span = (obs.bbox_xyxy_norm[2] - obs.bbox_xyxy_norm[0]) * 0.20
+                                else:
+                                    em_x, em_y = reye.x, reye.y
+                                    e_span = (obs.bbox_xyxy_norm[2] - obs.bbox_xyxy_norm[0]) * 0.20
+
+                                eye_origin = (int(em_x * width), int(em_y * height))
+                                gaze_dir = features.head.direction
+                                yaw_val = features.head.yaw_proxy
+                                pitch_val = features.head.pitch_proxy
+
+                                ray_len = max(24, int(e_span * width * 1.6))
+                                if gaze_dir == GazeDirection.LEFT:
+                                    ray_dx, ray_dy = -1.0, float(pitch_val * 0.5)
+                                    gaze_col = (0, 0, 255) if is_neighbour_look else (0, 165, 255)
+                                elif gaze_dir == GazeDirection.RIGHT:
+                                    ray_dx, ray_dy = 1.0, float(pitch_val * 0.5)
+                                    gaze_col = (0, 0, 255) if is_neighbour_look else (0, 165, 255)
+                                elif gaze_dir == GazeDirection.DOWN:
+                                    ray_dx, ray_dy = float(yaw_val * 0.5), 1.0
+                                    gaze_col = (255, 200, 0)
+                                elif gaze_dir == GazeDirection.UP:
+                                    ray_dx, ray_dy = float(yaw_val * 0.5), -1.0
+                                    gaze_col = (200, 200, 200)
+                                else:
+                                    ray_dx, ray_dy = float(yaw_val * 0.6), 0.2
+                                    gaze_col = (0, 255, 128)
+
+                                norm_len = max(1e-3, float(np.hypot(ray_dx, ray_dy)))
+                                ray_target = (
+                                    int(eye_origin[0] + (ray_dx / norm_len) * ray_len),
+                                    int(eye_origin[1] + (ray_dy / norm_len) * ray_len)
+                                )
+                                gaze_rays_to_draw.append((eye_origin, ray_target, gaze_col, gaze_dir.value))
+
                             # Candidate Identification Tag
                             lx, ly = bx_px[0], bx_px[1]
+                            tag_main = f"{cand_id} -> {desk_id} | GAZE: {gaze_str}"
+                            if is_neighbour_look and neighbour_cand:
+                                tag_main += f" [PEEKING -> {neighbour_cand}]"
+
                             if candidate_state == CandidateBehaviouralState.HIGH_PRIORITY_REVIEW:
-                                tag = f"ALERT: {cand_id} -> {desk_id} | S:{eval_result.suspicion_score:.2f} U:{eval_result.uncertainty_score:.2f}"
+                                tag = f"ALERT: {tag_main} | S:{eval_result.suspicion_score:.2f} U:{eval_result.uncertainty_score:.2f}"
                                 box_col = (0, 0, 255)
                             elif candidate_state == CandidateBehaviouralState.REVIEW:
-                                tag = f"REVIEW: {cand_id} -> {desk_id} | S:{eval_result.suspicion_score:.2f}"
+                                tag = f"REVIEW: {tag_main} | S:{eval_result.suspicion_score:.2f}"
                                 box_col = (0, 165, 255)
                             elif candidate_state == CandidateBehaviouralState.SUSPICIOUS:
-                                tag = f"MONITORING: {cand_id} -> {desk_id}"
+                                tag = f"MONITORING: {tag_main}"
                                 box_col = (0, 220, 255)
                             else:
-                                tag = f"{cand_id} -> {desk_id}"
+                                tag = tag_main
                                 box_col = color
 
                             cv2.rectangle(rendered_frame, (lx, max(0, ly - 22)), (lx + len(tag)*8 + 12, max(20, ly)), (15, 15, 15), -1)
@@ -573,6 +660,11 @@ def run_unified_pipeline(
                                 "candidate_id": cand_id,
                                 "desk_id": desk_id,
                                 "state": candidate_state.value,
+                                "gaze_direction": gaze_str,
+                                "gaze_yaw_proxy": round(features.head.yaw_proxy, 4),
+                                "gaze_pitch_proxy": round(features.head.pitch_proxy, 4),
+                                "is_peeking_neighbour": is_neighbour_look,
+                                "neighbour_candidate": neighbour_cand,
                                 "suspicion_score": round(eval_result.suspicion_score, 4),
                                 "uncertainty_score": round(eval_result.uncertainty_score, 4),
                                 "dominant_hypothesis": eval_result.dominant_hypothesis.value,
@@ -590,6 +682,11 @@ def run_unified_pipeline(
                             raw_tracked_people,
                             min_keypoint_confidence=0.15
                         )
+
+                        # Draw Gaze Direction Rays directly over unblurred eyes (Layer 4 Section 5.4)
+                        for eye_origin, ray_target, gaze_col, gaze_label in gaze_rays_to_draw:
+                            cv2.arrowedLine(rendered_frame, eye_origin, ray_target, gaze_col, 2, cv2.LINE_AA, tipLength=0.35)
+                            cv2.circle(rendered_frame, eye_origin, 3, gaze_col, -1, cv2.LINE_AA)
 
                         # Global Telemetry HUD
                         env_label = env_profiler.environment_type.value if env_profiler.finalized else "PROFILING..."
@@ -644,25 +741,45 @@ def run_unified_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Master Unified Pipeline Runner for NETRA-4D / DrishtiAI")
-    parser.add_argument("--asset", default="VIDEO_01")
-    parser.add_argument("--sample-every", type=int, default=2)
+    parser.add_argument("--asset", default=None, help="Asset ID to process, e.g. VIDEO_01 or 'ALL'")
+    parser.add_argument("--assets", nargs="*", default=None, help="List of assets to process: VIDEO_01 VIDEO_02 ... or 'all'")
+    parser.add_argument("--sample-every", type=int, default=1, help="Frame step interval (1 = all frames)")
     parser.add_argument("--max-frames", type=int, default=0, help="0 means full video")
     parser.add_argument("--prime-vram-gb", type=float, default=2.2)
     args = parser.parse_args()
 
     manifest = load_drive_manifest(ROOT / "drishti4d" / "configs" / "datasets.json")
-    asset = next((a for a in manifest if a.asset_id == args.asset), None)
-    if not asset:
-        print(f"Asset {args.asset} not found in manifest!")
-        sys.exit(1)
 
-    out_dir = ROOT / "outputs" / "unified_pipeline" / args.asset
-    print(f"Streaming {asset.asset_id} ({asset.filename}) into Unified Pipeline...")
-    with materialize_drive_asset(asset, temp_root=out_dir / ".staging") as (video_path, prov):
-        run_unified_pipeline(
-            video_source=video_path,
-            output_dir=out_dir,
-            sample_every=args.sample_every,
-            max_frames=args.max_frames,
-            prime_vram_gb=args.prime_vram_gb
-        )
+    # Resolve target assets
+    if args.assets:
+        if any(a.lower() == "all" for a in args.assets):
+            target_ids = [a.asset_id for a in manifest]
+        else:
+            target_ids = args.assets
+    elif args.asset:
+        if args.asset.upper() == "ALL":
+            target_ids = [a.asset_id for a in manifest]
+        else:
+            target_ids = [args.asset]
+    else:
+        target_ids = ["VIDEO_01"]
+
+    print(f"[NETRA-4D] Target assets to process: {target_ids}")
+    for asset_id in target_ids:
+        asset = next((a for a in manifest if a.asset_id == asset_id), None)
+        if not asset:
+            print(f"Asset {asset_id} not found in manifest!")
+            continue
+
+        out_dir = ROOT / "outputs" / "unified_pipeline" / asset_id
+        print(f"\n=======================================================")
+        print(f"Streaming {asset.asset_id} ({asset.filename}) into Unified Pipeline...")
+        print(f"=======================================================")
+        with materialize_drive_asset(asset, temp_root=out_dir / ".staging") as (video_path, prov):
+            run_unified_pipeline(
+                video_source=video_path,
+                output_dir=out_dir,
+                sample_every=args.sample_every,
+                max_frames=args.max_frames,
+                prime_vram_gb=args.prime_vram_gb
+            )
