@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "third_party" / "multi-hmr"))
 
 from drishti.data.google_drive import load_drive_manifest, materialize_drive_asset
+from drishti.privacy import apply_privacy_mask_and_collect_annotations
 from drishti.pipeline.environment import EnvironmentProfiler, EnvironmentType
 from drishti.pipeline.role_registry import ImmutableRoleRegistry, RoleEnum
 from drishti.pipeline.specialist_crop import SpecialistHandCropAnalyzer
@@ -143,20 +144,6 @@ def preprocess_frame_for_hmr(frame_bgr: np.ndarray, img_size: int, device: torch
     return tensor, (scale, pad_x, pad_y)
 
 
-def apply_universal_face_blur(frame_bgr: np.ndarray, head_box_px: Tuple[int, int, int, int]) -> np.ndarray:
-    """Universal Privacy Face Blur applied to Candidates and Invigilators alike."""
-    h, w = frame_bgr.shape[:2]
-    x1, y1, x2, y2 = head_box_px
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    if x2 > x1 and y2 > y1:
-        head_roi = frame_bgr[y1:y2, x1:x2]
-        # Kernel size dynamically scaled by bounding box size, ensuring odd integer
-        kw = max(15, (int(x2 - x1) // 4) | 1)
-        kh = max(15, (int(y2 - y1) // 4) | 1)
-        blurred = cv2.GaussianBlur(head_roi, (kw, kh), 0)
-        frame_bgr[y1:y2, x1:x2] = blurred
-    return frame_bgr
 
 
 def run_unified_pipeline(
@@ -264,7 +251,7 @@ def run_unified_pipeline(
                         # -------------------------------------------------------------
                         # A. Continuous Vision Stream (Stage 1)
                         # -------------------------------------------------------------
-                        pose_res = yolo_pose.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.25, device=device, verbose=False)[0]
+                        pose_res = yolo_pose.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.15, device=device, verbose=False)[0]
                         raw_tracked_people = []
                         if pose_res.boxes is not None and len(pose_res.boxes) > 0:
                             boxes = pose_res.boxes.xyxy.cpu().numpy()
@@ -369,21 +356,24 @@ def run_unified_pipeline(
                         # E. Temporal Behavioral Engine & Arbitration (Layer 3 & 4)
                         # -------------------------------------------------------------
                         rendered_frame = frame.copy()
-                        overlay_mesh = frame.copy()
                         frame_audit_records = []
 
-                        # Universal Face Blur: Proctors & Candidates
-                        for p in raw_tracked_people:
-                            kp = p["keypoints"]
-                            bx = p["bbox"]
-                            if kp is not None and len(kp) >= 1 and kp[0][2] > 0.2:
-                                head_span = abs(bx[2] - bx[0]) * 0.35
-                                hx1, hy1 = int(kp[0][0] - head_span), int(kp[0][1] - head_span)
-                                hx2, hy2 = int(kp[0][0] + head_span), int(kp[0][1] + head_span)
-                                rendered_frame = apply_universal_face_blur(rendered_frame, (hx1, hy1, hx2, hy2))
-
                         for cand_id, state in active_candidates.items():
-                            if state.identity.is_invigilator or not state.is_visible or not state.current_observation:
+                            if state.identity.is_invigilator:
+                                continue
+
+                            if not state.is_visible or not state.current_observation:
+                                # Acknowledge occluded / partial candidate continuously on display
+                                anc_cx, anc_cy = state.identity.anchor_center_norm
+                                anc_bw, anc_bh = state.identity.anchor_box_size_norm
+                                x1 = max(0, int((anc_cx - anc_bw / 2.0) * width))
+                                y1 = max(0, int((anc_cy - anc_bh / 2.0) * height))
+                                x2 = min(width, int((anc_cx + anc_bw / 2.0) * width))
+                                y2 = min(height, int((anc_cy + anc_bh / 2.0) * height))
+                                tag = f"{cand_id} -> {state.identity.workstation_id} [OCCLUDED]"
+                                cv2.rectangle(rendered_frame, (x1, y1), (x2, y2), (70, 70, 70), 1, cv2.LINE_AA)
+                                cv2.rectangle(rendered_frame, (x1, max(0, y1 - 18)), (x1 + len(tag)*7 + 8, max(18, y1)), (15, 15, 15), -1)
+                                cv2.putText(rendered_frame, tag, (x1 + 4, max(13, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1, cv2.LINE_AA)
                                 continue
 
                             obs = state.current_observation
@@ -518,7 +508,7 @@ def run_unified_pipeline(
                                     p2d_orig[:, 0] = (p2d_padded[:, 0] - pad_x) / scale
                                     p2d_orig[:, 1] = (p2d_padded[:, 1] - pad_y) / scale
                                     pts_triangles = p2d_orig[faces_sampled].astype(np.int32)
-                                    cv2.polylines(overlay_mesh, pts_triangles, isClosed=True, color=(0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
+                                    cv2.polylines(rendered_frame, pts_triangles, isClosed=True, color=(0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
 
                             # -------------------------------------------------------------
                             # G. Visual Overlays (Selective & Privacy Safe)
@@ -526,19 +516,39 @@ def run_unified_pipeline(
                             color = PALETTE_BGR[hash(cand_id) % len(PALETTE_BGR)]
                             bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
 
-                            # Skeleton lines
+                            # Skeleton lines with confidence threshold 0.15 (supports partial & back-facing bodies)
                             for p1_idx, p2_idx in SKELETON_PAIRS:
                                 p1_name = YOLO26Adapter.COCO_KEYPOINT_NAMES[p1_idx]
                                 p2_name = YOLO26Adapter.COCO_KEYPOINT_NAMES[p2_idx]
                                 kp1 = obs.get_keypoint(p1_name)
                                 kp2 = obs.get_keypoint(p2_name)
-                                if kp1 and kp2 and kp1.confidence > 0.3 and kp2.confidence > 0.3:
+                                if kp1 and kp2 and kp1.confidence > 0.15 and kp2.confidence > 0.15:
                                     cv2.line(
                                         rendered_frame,
                                         (int(kp1.x * width), int(kp1.y * height)),
                                         (int(kp2.x * width), int(kp2.y * height)),
                                         color, 2, cv2.LINE_AA
                                     )
+
+                            # If back-facing (shoulders visible but face occluded), anchor head up from mid-shoulder
+                            ls = obs.get_keypoint("left_shoulder")
+                            rs = obs.get_keypoint("right_shoulder")
+                            nose_kp = obs.get_keypoint("nose")
+                            if ls and rs and ls.confidence > 0.15 and rs.confidence > 0.15:
+                                mid_sh_x = (ls.x + rs.x) / 2.0
+                                mid_sh_y = (ls.y + rs.y) / 2.0
+                                sh_dist = float(np.hypot(ls.x - rs.x, ls.y - rs.y))
+                                if not nose_kp or nose_kp.confidence <= 0.15:
+                                    head_top = (int(mid_sh_x * width), int((mid_sh_y - sh_dist * 0.45) * height))
+                                    neck_pt = (int(mid_sh_x * width), int(mid_sh_y * height))
+                                    cv2.line(rendered_frame, neck_pt, head_top, color, 2, cv2.LINE_AA)
+                                    cv2.circle(rendered_frame, head_top, max(3, int(sh_dist * 0.22 * width)), color, 1, cv2.LINE_AA)
+
+                            # Draw keypoint circles for all detected joints
+                            for kp_name, kp in obs.keypoints.items():
+                                if kp.confidence > 0.15:
+                                    cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 3, (255, 255, 255), -1, cv2.LINE_AA)
+                                    cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 2, color, -1, cv2.LINE_AA)
 
                             # Candidate Identification Tag
                             lx, ly = bx_px[0], bx_px[1]
@@ -571,8 +581,15 @@ def run_unified_pipeline(
                                 "counter_evidence": eval_result.counter_evidence,
                             })
 
-                        # Blend 3D mesh wireframe overlay
-                        rendered_frame = cv2.addWeighted(overlay_mesh, 0.50, rendered_frame, 0.50, 0)
+                        # =====================================================================
+                        # UNIVERSAL PRIVACY FACE MASK (Layer 4 Privacy Renderer: drishti.privacy)
+                        # Applied to ALL Candidates and Invigilators with Zero Biometric Leakage
+                        # =====================================================================
+                        rendered_frame, _ = apply_privacy_mask_and_collect_annotations(
+                            rendered_frame,
+                            raw_tracked_people,
+                            min_keypoint_confidence=0.15
+                        )
 
                         # Global Telemetry HUD
                         env_label = env_profiler.environment_type.value if env_profiler.finalized else "PROFILING..."

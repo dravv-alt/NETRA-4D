@@ -24,10 +24,24 @@ class PrivacyAnnotation:
 
 
 def _point(person: Any, name: str, width: int, height: int, min_confidence: float) -> tuple[float, float, float] | None:
-    point = (person.keypoints_2d or {}).get(name)
-    if point is None or point.confidence < min_confidence:
-        return None
-    return point.x * width, point.y * height, point.confidence
+    kpts = getattr(person, "keypoints_2d", None) or getattr(person, "keypoints", None)
+    if isinstance(kpts, dict):
+        point = kpts.get(name)
+        if point is not None and getattr(point, "confidence", 0.0) >= min_confidence:
+            return point.x * width, point.y * height, point.confidence
+    elif isinstance(person, dict) and person.get("keypoints") is not None:
+        kp_arr = person["keypoints"]
+        COCO_NAMES = [
+            "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+            "left_wrist", "right_wrist", "left_hip", "right_hip",
+            "left_knee", "right_knee", "left_ankle", "right_ankle"
+        ]
+        if name in COCO_NAMES:
+            idx = COCO_NAMES.index(name)
+            if idx < len(kp_arr) and kp_arr[idx][2] >= min_confidence:
+                return float(kp_arr[idx][0]), float(kp_arr[idx][1]), float(kp_arr[idx][2])
+    return None
 
 
 def _clamp_box(box: tuple[float, float, float, float], width: int, height: int) -> tuple[int, int, int, int]:
@@ -56,7 +70,16 @@ def face_region_from_pose(person: Any, width: int, height: int, *, min_confidenc
             width, height,
         ), "pose_facial_keypoints"
 
-    x1, y1, x2, y2 = person.bbox_xyxy_px
+    if hasattr(person, "bbox_xyxy_px"):
+        x1, y1, x2, y2 = person.bbox_xyxy_px
+    elif hasattr(person, "bbox_xyxy_norm"):
+        b = person.bbox_xyxy_norm
+        x1, y1, x2, y2 = b[0] * width, b[1] * height, b[2] * width, b[3] * height
+    elif isinstance(person, dict) and "bbox" in person:
+        x1, y1, x2, y2 = person["bbox"]
+    else:
+        x1, y1, x2, y2 = 0.0, 0.0, 0.0, 0.0
+
     person_height = max(float(y2) - float(y1), 1.0)
     # Privacy fallback covers the likely head region; it does not assert a face was detected.
     return _clamp_box((x1, y1, x2, y1 + person_height * 0.35), width, height), "person_head_region_fallback"
@@ -93,9 +116,19 @@ def _blur_region(image: np.ndarray, box: tuple[int, int, int, int]) -> None:
     if region.size == 0:
         return
     width, height = x2 - x1, y2 - y1
-    kernel_x = max(3, (width // 3) | 1)
-    kernel_y = max(3, (height // 3) | 1)
-    image[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel_x, kernel_y), 0)
+    if width >= 4 and height >= 4:
+        # Dynamic dual-stage: pixelate to destroy facial biometric features, then Gaussian blur to smooth
+        sw = max(2, width // 14)
+        sh = max(2, height // 14)
+        small = cv2.resize(region, (sw, sh), interpolation=cv2.INTER_LINEAR)
+        pixelated = cv2.resize(small, (width, height), interpolation=cv2.INTER_NEAREST)
+        kernel_x = max(25, (width // 3) | 1)
+        kernel_y = max(25, (height // 3) | 1)
+        image[y1:y2, x1:x2] = cv2.GaussianBlur(pixelated, (kernel_x, kernel_y), 0)
+    else:
+        kernel_x = max(3, (width // 3) | 1)
+        kernel_y = max(3, (height // 3) | 1)
+        image[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel_x, kernel_y), 0)
 
 
 def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> tuple[np.ndarray, list[PrivacyAnnotation]]:
@@ -112,8 +145,12 @@ def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[A
             person, width, height, min_confidence=min_keypoint_confidence
         )
         _blur_region(masked, face_box)
-        entity_source = person.metadata.get("entity_id_source", "frame_local_index")
-        candidate_id = f"Candidate {person.entity_local_id}"
+        meta = getattr(person, "metadata", None) or (person.get("metadata", {}) if isinstance(person, dict) else {})
+        entity_source = meta.get("entity_id_source", "tracker" if isinstance(person, dict) and "track_id" in person else "frame_local_index")
+        ent_id = getattr(person, "entity_local_id", None)
+        if ent_id is None and isinstance(person, dict):
+            ent_id = person.get("track_id", person.get("entity_local_id", "0"))
+        candidate_id = f"Candidate {ent_id}"
         if entity_source != "tracker":
             candidate_id += " (frame-local)"
         annotations.append(PrivacyAnnotation(
@@ -131,7 +168,8 @@ def draw_post_blur_candidate_annotations(frame: np.ndarray, people: list[Any], a
 
     output = frame.copy()
     for person, annotation in zip(people, annotations):
-        x1, y1, _, _ = (int(value) for value in person.bbox_xyxy_px)
+        bx = getattr(person, "bbox_xyxy_px", None) or (person.get("bbox", (0, 0, 0, 0)) if isinstance(person, dict) else (0, 0, 0, 0))
+        x1, y1 = int(bx[0]), int(bx[1])
         fx1, fy1, fx2, fy2 = annotation.face_bbox_xyxy_px
         label = f"{annotation.candidate_id} | GAZE PROXY: {annotation.gaze_proxy}"
         cv2.putText(output, label, (x1, max(18, y1 - 24)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2, cv2.LINE_AA)

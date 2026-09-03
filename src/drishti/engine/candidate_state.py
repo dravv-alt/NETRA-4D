@@ -204,17 +204,17 @@ class CandidateStateManager:
                 state.active_tracker_id = obs.track_id
                 self.track_to_candidate_id[obs.track_id] = best_candidate_id
                 matched_candidate_ids.add(best_candidate_id)
-            elif not self.is_finalized:
-                # During warmup, new seated candidate discovered
+            else:
+                # Dynamically register candidate anchor so no person is ever ignored
                 new_state = self.register_candidate_anchor(obs.track_id, obs.bbox_xyxy_norm)
                 new_state.current_observation = obs
                 new_state.last_seen_timestamp_sec = timestamp_sec
                 new_state.last_seen_frame_idx = frame_idx
                 new_state.total_observations_count = 1
+                if self.is_finalized:
+                    new_state.identity.lock_status = IdentityLockStatus.IDENTITY_UNCERTAIN
+                    obs.metadata["identity_status"] = IdentityLockStatus.IDENTITY_UNCERTAIN.value
                 matched_candidate_ids.add(new_state.identity.candidate_id)
-            else:
-                # Post-warmup, unresolvable person -> IDENTITY_UNCERTAIN invariant
-                obs.metadata["identity_status"] = IdentityLockStatus.IDENTITY_UNCERTAIN.value
 
         # 3. Handle missed tracks
         for cand_id, state in self.candidates.items():

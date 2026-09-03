@@ -40,3 +40,18 @@ def test_missing_facial_keypoints_blurs_head_but_marks_gaze_unknown():
     assert annotations[0].gaze_proxy == "UNKNOWN"
     assert annotations[0].candidate_id == "Candidate 7"
     assert masked.shape == image.shape
+
+
+def test_dict_person_privacy_masking():
+    image = np.full((200, 200, 3), 200, dtype=np.uint8)
+    raw_person = {
+        "track_id": 4,
+        "bbox": [20.0, 20.0, 80.0, 140.0],
+        "keypoints": np.array([[50.0, 40.0, 0.9], [45.0, 35.0, 0.9], [55.0, 35.0, 0.9]]),
+        "confidence": 0.88,
+    }
+    masked, annotations = apply_privacy_mask_and_collect_annotations(image, [raw_person])
+    assert len(annotations) == 1
+    assert annotations[0].candidate_id == "Candidate 4"
+    assert annotations[0].face_region_source == "pose_facial_keypoints"
+    assert masked.shape == image.shape
