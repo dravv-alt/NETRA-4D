@@ -61,6 +61,7 @@ from drishti.engine.features import (
     GazeDirection,
 )
 from drishti.engine.primitive_events import (
+    PrimitiveEvent,
     PrimitiveEventDetector,
     PrimitiveEventType,
 )

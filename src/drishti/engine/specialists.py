@@ -135,17 +135,31 @@ class MediaPipeHandRunner:
             return None
 
         raw_landmarks = result.hand_landmarks[0]
-        points_3d = []
-        for lm in raw_landmarks:
-            points_3d.append((float(lm.x), float(lm.y), float(lm.z)))
-
-        # Confidence from handedness category score
         score = 0.85
         if result.handedness and result.handedness[0]:
             score = float(result.handedness[0][0].score)
 
+        from .observation import HAND_LANDMARK_NAMES
+        lms_dict = {}
+        for i, lm in enumerate(raw_landmarks):
+            kname = HAND_LANDMARK_NAMES[i] if i < len(HAND_LANDMARK_NAMES) else f"joint_{i}"
+            lms_dict[kname] = NormalizedKeypoint(
+                name=kname,
+                x=float(lm.x),
+                y=float(lm.y),
+                z=float(lm.z),
+                visibility=1.0,
+                confidence=score
+            )
+
+        wrist_kp = lms_dict.get("wrist")
+        mid_mcp = lms_dict.get("middle_finger_mcp")
+        palm_center = ((wrist_kp.x + mid_mcp.x) / 2.0, (wrist_kp.y + mid_mcp.y) / 2.0) if wrist_kp and mid_mcp else None
+
         return HandLandmarksObservation(
-            landmarks_21_3d=points_3d,
+            side=handedness.upper(),
+            landmarks=lms_dict,
+            palm_center_norm=palm_center,
             confidence=score,
-            handedness=handedness
+            is_detected=True
         )

@@ -93,14 +93,13 @@ class EscalationGate:
         # 2. MediaPipe Hand 3D Landmark & Pinch Analysis
         if hand_crops_bgr and self.stage2_mediapipe_verifier is not None:
             mp_res = self.stage2_mediapipe_verifier(hand_crops_bgr[0])
-            if mp_res is not None:
-                measurements["mediapipe_hand_3d"] = len(mp_res.landmarks_21_3d)
-                # Compute pinch distance between thumb tip (idx 4) and index tip (idx 8)
-                lms = mp_res.landmarks_21_3d
-                if len(lms) >= 9:
-                    thumb_tip = np.array(lms[4][:2])
-                    index_tip = np.array(lms[8][:2])
-                    pinch_dist = float(np.linalg.norm(thumb_tip - index_tip))
+            if mp_res is not None and mp_res.is_detected:
+                measurements["mediapipe_hand_3d"] = len(mp_res.landmarks)
+                # Compute pinch distance between thumb tip and index tip
+                thumb_tip = mp_res.landmarks.get("thumb_tip")
+                index_tip = mp_res.landmarks.get("index_finger_tip")
+                if thumb_tip and index_tip:
+                    pinch_dist = float(np.hypot(thumb_tip.x - index_tip.x, thumb_tip.y - index_tip.y))
                     measurements["pinch_distance"] = round(pinch_dist, 4)
                     if pinch_dist < 0.22:
                         supporting.append(f"Stage 2 MediaPipe confirmed precision pinch grasp (dist: {pinch_dist:.2f})")
