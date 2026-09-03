@@ -693,4 +693,4 @@ Every element in this architecture is mapped directly to its corresponding modul
 | **SQLite Audit & Repository** | Layer 4: Evidence | [`src/drishti/event_repository.py`](file:///c:/Users/bhavv/OneDrive/Desktop/Dravvya(4th%20Sem)/Hackathons/NETRA-4D/src/drishti/event_repository.py) |
 | **Privacy-Safe Face Masking** | Layer 4: Privacy Renderer | [`src/drishti/privacy.py`](file:///c:/Users/bhavv/OneDrive/Desktop/Dravvya(4th%20Sem)/Hackathons/NETRA-4D/src/drishti/privacy.py) |
 | **Telemetry Dashboard & REST API** | UI & Verification | [`src/drishti/api/app.py`](file:///c:/Users/bhavv/OneDrive/Desktop/Dravvya(4th%20Sem)/Hackathons/NETRA-4D/src/drishti/api/app.py) |
-| **Unified Pipeline Runner** | End-to-End Orchestrator | [`scripts/run_situational_pipeline.py`](file:///c:/Users/bhavv/OneDrive/Desktop/Dravvya(4th%20Sem)/Hackathons/NETRA-4D/scripts/run_situational_pipeline.py) |
+| **Unified Pipeline Runner** | End-to-End Orchestrator | [`scripts/run_unified_pipeline.py`](file:///c:/Users/bhavv/OneDrive/Desktop/Dravvya(4th%20Sem)/Hackathons/NETRA-4D/scripts/run_unified_pipeline.py) |
