@@ -51,6 +51,28 @@ from .temporal_patterns import (
     RepetitionDetector,
     TemporalPatternType,
 )
+from .zones import (
+    NormalizedPolygonZone,
+    SemanticZoneEngine,
+    SemanticZoneType,
+    box_to_polygon,
+)
+from .hypotheses import (
+    CompetingHypothesisEngine,
+    EvidenceEvaluationResult,
+    HypothesisDistribution,
+    HypothesisKey,
+)
+from .state_machine import (
+    CandidateBehaviouralState,
+    CandidateStateMachine,
+    StateTransitionRecord,
+)
+from .escalation import (
+    EscalationGate,
+    EscalationStage,
+    SpecialistResolutionResult,
+)
 
 __all__ = [
     "HandLandmarksObservation",
@@ -86,4 +108,18 @@ __all__ = [
     "PersistenceDetector",
     "RepetitionDetector",
     "TemporalPatternType",
+    "NormalizedPolygonZone",
+    "SemanticZoneEngine",
+    "SemanticZoneType",
+    "box_to_polygon",
+    "CompetingHypothesisEngine",
+    "EvidenceEvaluationResult",
+    "HypothesisDistribution",
+    "HypothesisKey",
+    "CandidateBehaviouralState",
+    "CandidateStateMachine",
+    "StateTransitionRecord",
+    "EscalationGate",
+    "EscalationStage",
+    "SpecialistResolutionResult",
 ]
