@@ -40,6 +40,17 @@ from .features import (
     HeadFeatures,
     TorsoFeatures,
 )
+from .primitive_events import (
+    PrimitiveEvent,
+    PrimitiveEventDetector,
+    PrimitiveEventType,
+)
+from .temporal_patterns import (
+    AggregatedTemporalPattern,
+    PersistenceDetector,
+    RepetitionDetector,
+    TemporalPatternType,
+)
 
 __all__ = [
     "HandLandmarksObservation",
@@ -68,4 +79,11 @@ __all__ = [
     "HandDynamicsFeatures",
     "HeadFeatures",
     "TorsoFeatures",
+    "PrimitiveEvent",
+    "PrimitiveEventDetector",
+    "PrimitiveEventType",
+    "AggregatedTemporalPattern",
+    "PersistenceDetector",
+    "RepetitionDetector",
+    "TemporalPatternType",
 ]
