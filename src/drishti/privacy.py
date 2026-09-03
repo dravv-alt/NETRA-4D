@@ -110,32 +110,115 @@ def gaze_proxy_from_pose(person: Any, width: int, height: int, *, min_confidence
     return "FORWARD", confidence
 
 
-def _blur_region(image: np.ndarray, box: tuple[int, int, int, int]) -> None:
-    x1, y1, x2, y2 = box
-    region = image[y1:y2, x1:x2]
-    if region.size == 0:
-        return
-    width, height = x2 - x1, y2 - y1
-    if width >= 4 and height >= 4:
-        # Dynamic dual-stage: pixelate to destroy facial biometric features, then Gaussian blur to smooth
-        sw = max(2, width // 14)
-        sh = max(2, height // 14)
-        small = cv2.resize(region, (sw, sh), interpolation=cv2.INTER_LINEAR)
-        pixelated = cv2.resize(small, (width, height), interpolation=cv2.INTER_NEAREST)
-        kernel_x = max(25, (width // 3) | 1)
-        kernel_y = max(25, (height // 3) | 1)
-        image[y1:y2, x1:x2] = cv2.GaussianBlur(pixelated, (kernel_x, kernel_y), 0)
-    else:
-        kernel_x = max(3, (width // 3) | 1)
-        kernel_y = max(3, (height // 3) | 1)
-        image[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel_x, kernel_y), 0)
+def build_adaptive_face_mask(height: int, width: int, people: list[Any], min_confidence: float = 0.15) -> np.ndarray:
+    """
+    Constructs an angle-adaptive face-contour mask that covers the face boundary
+    for privacy protection while preserving the eyes (for gaze tracking) and neck.
+    Returns a single-channel uint8 mask (0 = sharp/preserve, 255 = blur).
+    """
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for person in people:
+        person_mask = np.zeros((height, width), dtype=np.uint8)
+
+        # Extract bounding box
+        bx = getattr(person, "bbox_xyxy_px", None)
+        if bx is None and hasattr(person, "bbox_xyxy_norm"):
+            b = person.bbox_xyxy_norm
+            bx = (b[0] * width, b[1] * height, b[2] * width, b[3] * height)
+        elif bx is None and isinstance(person, dict) and "bbox" in person:
+            bx = person["bbox"]
+        elif bx is None:
+            continue
+
+        bw = max(10.0, float(bx[2] - bx[0]))
+        bh = max(10.0, float(bx[3] - bx[1]))
+
+        # Keypoints
+        nose = _point(person, "nose", width, height, min_confidence)
+        leye = _point(person, "left_eye", width, height, min_confidence)
+        reye = _point(person, "right_eye", width, height, min_confidence)
+        lear = _point(person, "left_ear", width, height, min_confidence)
+        rear = _point(person, "right_ear", width, height, min_confidence)
+        lsh = _point(person, "left_shoulder", width, height, min_confidence)
+        rsh = _point(person, "right_shoulder", width, height, min_confidence)
+
+        has_nose = nose is not None
+        has_leye = leye is not None
+        has_reye = reye is not None
+        has_eyes = has_leye or has_reye
+        has_shoulders = lsh is not None and rsh is not None
+
+        if has_eyes or has_nose:
+            cranial_pts = [p[:2] for p in [nose, leye, reye, lear, rear] if p is not None]
+            fc_x = float(np.mean([p[0] for p in cranial_pts]))
+            fc_y = float(np.mean([p[1] for p in cranial_pts]))
+
+            if has_leye and has_reye:
+                eye_dist = float(np.hypot(reye[0] - leye[0], reye[1] - leye[1]))
+                eye_dist = max(eye_dist, bw * 0.16)
+                angle_deg = float(np.degrees(np.arctan2(reye[1] - leye[1], reye[0] - leye[0])))
+            else:
+                eye_dist = bw * 0.20
+                angle_deg = 0.0
+
+            # Proportional face ellipse: tightly contours cheeks, mouth, jaw
+            axis_x = int(max(6.0, eye_dist * 1.25))
+            axis_y = int(max(8.0, eye_dist * 1.50))
+
+            if has_nose and has_eyes:
+                mid_eye_y = (leye[1] + reye[1]) / 2.0 if (has_leye and has_reye) else (leye[1] if has_leye else reye[1])
+                fc_y += (nose[1] - mid_eye_y) * 0.35
+
+            cv2.ellipse(person_mask, (int(fc_x), int(fc_y)), (axis_x, axis_y), angle_deg, 0, 360, 255, -1)
+
+            # Preserve eyes for gaze tracking
+            eye_radius = int(max(3.0, eye_dist * 0.32))
+            if has_leye:
+                cv2.circle(person_mask, (int(leye[0]), int(leye[1])), eye_radius, 0, -1)
+            if has_reye:
+                cv2.circle(person_mask, (int(reye[0]), int(reye[1])), eye_radius, 0, -1)
+            if has_leye and has_reye:
+                mid_eye = (int((leye[0] + reye[0]) / 2.0), int((leye[1] + reye[1]) / 2.0))
+                cv2.ellipse(person_mask, mid_eye, (int(eye_dist * 0.55), int(eye_radius * 0.75)), angle_deg, 0, 360, 0, -1)
+
+            # Preserve neck
+            if has_shoulders:
+                sh_mid_y = (lsh[1] + rsh[1]) / 2.0
+                chin_y = fc_y + axis_y * 0.75
+                if sh_mid_y > chin_y:
+                    neck_poly = np.array([
+                        [int(fc_x - axis_x * 1.5), int(chin_y)],
+                        [int(fc_x + axis_x * 1.5), int(chin_y)],
+                        [int(rsh[0]), int(rsh[1])],
+                        [int(lsh[0]), int(lsh[1])]
+                    ], dtype=np.int32)
+                    cv2.fillPoly(person_mask, [neck_poly], 0)
+        elif has_shoulders:
+            # Back-facing: cranial cap centered above shoulders
+            sh_mid_x = (lsh[0] + rsh[0]) / 2.0
+            sh_mid_y = (lsh[1] + rsh[1]) / 2.0
+            sh_span = float(np.hypot(rsh[0] - lsh[0], rsh[1] - lsh[1]))
+            head_x = int(sh_mid_x)
+            head_y = int(sh_mid_y - sh_span * 0.48)
+            cw = int(sh_span * 0.26)
+            ch = int(sh_span * 0.30)
+            cv2.ellipse(person_mask, (head_x, head_y), (cw, ch), 0, 0, 360, 255, -1)
+        else:
+            # Fallback when keypoints are missing (top 28% of box)
+            cw = int(bw * 0.35)
+            ch = int(bh * 0.20)
+            cx = int((bx[0] + bx[2]) / 2.0)
+            cy = int(bx[1] + ch * 0.9)
+            cv2.ellipse(person_mask, (cx, cy), (cw, ch), 0, 0, 360, 255, -1)
+
+        mask = cv2.bitwise_or(mask, person_mask)
+    return mask
 
 
 def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> tuple[np.ndarray, list[PrivacyAnnotation]]:
-    """Compute gaze first, blur face/head second, return records for final overlay."""
+    """Compute gaze first, blur face boundary second (preserving eyes and neck), return records for final overlay."""
 
     height, width = frame.shape[:2]
-    masked = frame.copy()
     annotations: list[PrivacyAnnotation] = []
     for person in people:
         gaze_proxy, gaze_confidence = gaze_proxy_from_pose(
@@ -144,7 +227,6 @@ def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[A
         face_box, source = face_region_from_pose(
             person, width, height, min_confidence=min_keypoint_confidence
         )
-        _blur_region(masked, face_box)
         meta = getattr(person, "metadata", None) or (person.get("metadata", {}) if isinstance(person, dict) else {})
         entity_source = meta.get("entity_id_source", "tracker" if isinstance(person, dict) and "track_id" in person else "frame_local_index")
         ent_id = getattr(person, "entity_local_id", None)
@@ -160,6 +242,24 @@ def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[A
             gaze_proxy=gaze_proxy,
             gaze_proxy_confidence=gaze_confidence,
         ))
+
+    # Construct angle-adaptive face-contour mask (preserves eyes and neck)
+    mask = build_adaptive_face_mask(height, width, people, min_confidence=min_keypoint_confidence)
+
+    if np.any(mask > 0):
+        # Create full-frame heavy dual-stage blur (pixelated + Gaussian)
+        sw, sh = max(4, width // 25), max(4, height // 25)
+        small = cv2.resize(frame, (sw, sh), interpolation=cv2.INTER_LINEAR)
+        pixelated = cv2.resize(small, (width, height), interpolation=cv2.INTER_NEAREST)
+        blurred_frame = cv2.GaussianBlur(pixelated, (31, 31), 0)
+
+        # Smooth feathered alpha blend
+        mask_feathered = cv2.GaussianBlur(mask, (15, 15), 0)
+        alpha = (mask_feathered.astype(np.float32) / 255.0)[:, :, np.newaxis]
+        masked = (alpha * blurred_frame.astype(np.float32) + (1.0 - alpha) * frame.astype(np.float32)).astype(np.uint8)
+    else:
+        masked = frame.copy()
+
     return masked, annotations
 
 
