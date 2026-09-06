@@ -17,6 +17,14 @@ export interface SeatNodeData {
   candidateName: string;
   cameraIds: string[]; // ["CAM-03"]
   gridPosition: { row: string; col: number };
+  spatialPosition?: {
+    x: number; // 0 to 100 percentage of room width
+    y: number; // 0 to 100 percentage of room height
+    facing: 'North' | 'South' | 'East' | 'West';
+    zoneId?: string;
+    zoneName?: string;
+    neighbors?: string[];
+  };
   state: OperationalState;
   telemetry: {
     trackContinuity: 'GOOD' | 'MODERATE' | 'POOR';
@@ -26,6 +34,47 @@ export interface SeatNodeData {
     lastEventSummary: string;
     lastEventTimeAgo: string;
   };
+}
+
+export interface RoomLandmark {
+  id: string;
+  name: string;
+  type: 'podium' | 'board' | 'door' | 'bookshelf' | 'walkway';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  facing?: 'North' | 'South' | 'East' | 'West';
+}
+
+export interface CameraPlacement {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  directionDeg: number;
+  fovAngle: number;
+  coverageSeatIds: string[];
+}
+
+export interface SpatialLayoutConfig {
+  layoutId: string;
+  name: string;
+  sourceType: 'default_grid' | 'blueprint_cad' | 'cctv_reverse_calibrated';
+  roomDimensions: { widthMeters: number; lengthMeters: number };
+  landmarks: RoomLandmark[];
+  cameras: CameraPlacement[];
+  terminals: SeatNodeData[];
+}
+
+export interface ReverseCalibrationResult {
+  success: boolean;
+  cameraId: string;
+  sourceFrameUrl?: string;
+  homographyGridPoints: [number, number][][];
+  detectedTerminalCount: number;
+  terminals: SeatNodeData[];
+  inferredZones: { id: string; name: string; orientation: 'North' | 'South' | 'East' | 'West'; terminalIds: string[] }[];
 }
 
 export interface EvidenceComponent {
