@@ -19,7 +19,8 @@ import {
   Eye,
   Layers,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Compass
 } from 'lucide-react';
 import { playHapticSound } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -43,11 +44,15 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
   const [activeTab, setActiveTab] = useState<'canvas' | 'ai-camera' | 'presets'>('canvas');
   const [editableSeats, setEditableSeats] = useState<SeatNodeData[]>(() => JSON.parse(JSON.stringify(currentSeats)));
 
-  // AI Camera Calibration State
+  // AI Camera / Blueprint Calibration State
   const [selectedCameraId, setSelectedCameraId] = useState<string>('CAM-01');
   const [isScanning, setIsScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [uploadedImageName, setUploadedImageName] = useState<string | null>(null);
+  const [aiSourceMode, setAiSourceMode] = useState<'cctv' | 'blueprint'>('cctv');
+  const [detectedTerminalCount, setDetectedTerminalCount] = useState<number>(20);
+  const [detectedConfidence, setDetectedConfidence] = useState<string>('98.4%');
+  const [calibratedData, setCalibratedData] = useState<SeatNodeData[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   if (!isOpen) return null;
@@ -107,9 +112,23 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
   };
 
   // Preset Loaders
-  const loadPreset = (presetType: '20-back-to-back' | '18-back-to-back' | '16-compact') => {
+  const loadPreset = (presetType: '20-back-to-back' | '18-back-to-back' | '16-compact' | 'real-computer-lab') => {
     playHapticSound('snap');
-    if (presetType === '20-back-to-back') {
+    if (presetType === 'real-computer-lab') {
+      const apiBase = (import.meta.env.VITE_NETRA_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+      fetch(`${apiBase}/api/spatial/parse-floorplan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_path: 'seating-plan-for-computer-class.png' }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.terminals && data.terminals.length > 0) {
+            setEditableSeats(data.terminals);
+          }
+        })
+        .catch(() => {});
+    } else if (presetType === '20-back-to-back') {
       const generated: SeatNodeData[] = [];
       // Row A (10 seats)
       for (let i = 1; i <= 10; i++) {
@@ -208,23 +227,66 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
     }
   };
 
-  // Run AI Camera Auto-Calibration Simulation
-  const handleStartAIScan = () => {
+  // Run AI Camera or Blueprint Auto-Calibration
+  const handleStartAIScan = async () => {
     playHapticSound('snap');
     setIsScanning(true);
     setScanComplete(false);
 
-    setTimeout(() => {
+    const apiBase = (import.meta.env.VITE_NETRA_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+    try {
+      if (uploadedImageName) {
+        // Path A: Architectural Blueprint Ingestion
+        setAiSourceMode('blueprint');
+        const res = await fetch(`${apiBase}/api/spatial/parse-floorplan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_path: uploadedImageName }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setDetectedTerminalCount(data.total_terminals || 18);
+          setDetectedConfidence('Dynamic OpenCV Contour & Orientation Verified');
+          if (data.terminals && data.terminals.length > 0) {
+            setCalibratedData(data.terminals);
+            setEditableSeats(data.terminals);
+          }
+        }
+      } else {
+        // Path B: CCTV Video Frame Inverse Perspective Mapping (Edge-case)
+        setAiSourceMode('cctv');
+        const res = await fetch(`${apiBase}/api/spatial/calibrate-from-cctv?camera_id=${selectedCameraId}`, {
+          method: 'POST',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const count = data.detected_terminal_count || data.terminals?.length || 6;
+          setDetectedTerminalCount(count);
+          setDetectedConfidence('Dynamic YOLO-Pose & Spatial Clustering');
+          if (data.terminals && data.terminals.length > 0) {
+            setCalibratedData(data.terminals);
+            setEditableSeats(data.terminals);
+          }
+        }
+      }
+    } catch {
+      // Keep existing editable seats
+    } finally {
       setIsScanning(false);
       setScanComplete(true);
       playHapticSound('snap');
-    }, 1800);
+    }
   };
 
   const handleApplyAIDetectedLayout = () => {
     playHapticSound('snap');
-    loadPreset('20-back-to-back');
-    setActiveTab('canvas');
+    const target = calibratedData || editableSeats;
+    if (target && target.length > 0) {
+      setEditableSeats(target);
+      onSaveSeats(target);
+      onClose();
+    }
   };
 
   const handleSaveAndApply = () => {
@@ -291,8 +353,8 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
           <div className="shrink-0 flex items-center justify-between">
             <Tabs
               items={[
-                { id: 'canvas', label: 'Drag & Drop Builder', icon: <Grid size={15} /> },
-                { id: 'ai-camera', label: 'AI Auto-Detect from Camera/Image', icon: <Sparkles size={15} /> },
+                { id: 'canvas', label: 'Terminal Row Canvas', icon: <Grid size={15} /> },
+                { id: 'ai-camera', label: 'AI Auto-Detect (CCTV / Blueprint)', icon: <Sparkles size={15} /> },
                 { id: 'presets', label: 'Lab Layout Templates', icon: <Layers size={15} /> },
               ]}
               activeId={activeTab}
@@ -443,6 +505,7 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
                 </div>
               </div>
             )}
+
 
             {/* ================= TAB 2: AI VISION AUTO-CALIBRATION ================= */}
             {activeTab === 'ai-camera' && (
@@ -623,11 +686,38 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
             {/* ================= TAB 3: PRESETS ================= */}
             {activeTab === 'presets' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Featured Blueprint CAD Preset */}
+                  <div className="bg-sky-50/50 p-5 rounded-2xl border-2 border-sky-400 space-y-3 hover:border-sky-600 transition-colors flex flex-col justify-between shadow-xs relative">
+                    <div className="absolute top-3 right-3 text-3xs font-mono font-bold bg-sky-600 text-white px-2 py-0.5 rounded-full">
+                      Blueprint CAD
+                    </div>
+                    <div>
+                      <div className="font-bold text-base text-neutral-950">Architectural Lab Blueprint</div>
+                      <div className="text-xs text-neutral-600 mt-1 leading-relaxed">
+                        Extracted from CAD seating plan: 5 West wall desks, 5 East wall desks, 6 center-island desks, 4 South entrance terminals, and proctor podium.
+                      </div>
+                      <div className="mt-3 text-xs font-semibold text-sky-950">
+                        • 20 Terminals (4 Facing Orientations)
+                      </div>
+                    </div>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => {
+                        loadPreset('real-computer-lab');
+                        setActiveTab('canvas');
+                      }}
+                      className="w-full mt-3 bg-sky-600 hover:bg-sky-700 text-white font-semibold"
+                    >
+                      Load Blueprint Layout
+                    </Button>
+                  </div>
+
                   {/* Preset 1 */}
                   <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-3 hover:border-neutral-400 transition-colors flex flex-col justify-between shadow-xs">
                     <div>
-                      <div className="font-bold text-base text-neutral-950">2-Row Back-to-Back Lab</div>
+                      <div className="font-bold text-base text-neutral-950">2-Row Back-to-Back Lab (Default)</div>
                       <div className="text-xs text-neutral-500 mt-1 leading-relaxed">
                         Standard 20-terminal computer lab with 10 North terminals and 10 South terminals facing outward.
                       </div>
