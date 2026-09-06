@@ -193,16 +193,20 @@ class YOLO26Adapter:
                     valid_kps += 1
 
         # Dynamic quality assessment without hardcoded thresholds
+        # In CBT exam hall, candidates are seated behind desks (legs/lower-body occluded)
         total_kps = len(cls.COCO_KEYPOINT_NAMES)
         coverage_ratio = valid_kps / float(total_kps) if total_kps > 0 else 0.0
 
-        if coverage_ratio >= 0.70:
+        if coverage_ratio >= 0.50:
             quality = ObservationQuality.EXCELLENT
             visibility = VisibilityState.VISIBLE
-        elif coverage_ratio >= 0.35:
+        elif coverage_ratio >= 0.15 or (det_confidence >= 0.25 and valid_kps >= 2):
             quality = ObservationQuality.ACCEPTABLE
             visibility = VisibilityState.VISIBLE
-        elif coverage_ratio > 0.10:
+        elif coverage_ratio >= 0.05 or (det_confidence >= 0.12 and valid_kps >= 1):
+            quality = ObservationQuality.DEGRADED
+            visibility = VisibilityState.VISIBLE
+        elif valid_kps > 0 or det_confidence >= 0.10:
             quality = ObservationQuality.DEGRADED
             visibility = VisibilityState.OCCLUDED
         else:

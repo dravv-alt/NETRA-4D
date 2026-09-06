@@ -63,8 +63,8 @@ class CandidateState:
     def is_visible(self) -> bool:
         return (
             self.current_observation is not None
-            and self.current_observation.visibility == VisibilityState.VISIBLE
-            and self.consecutive_missing_frames == 0
+            and self.current_observation.visibility in (VisibilityState.VISIBLE, VisibilityState.OCCLUDED)
+            and self.consecutive_missing_frames <= 35
         )
 
     @property
@@ -72,11 +72,11 @@ class CandidateState:
         return (
             self.current_observation is not None
             and self.current_observation.visibility == VisibilityState.OCCLUDED
-        ) or (1 <= self.consecutive_missing_frames <= 15)
+        ) or (1 <= self.consecutive_missing_frames <= 35)
 
     @property
     def is_lost(self) -> bool:
-        return self.consecutive_missing_frames > 15
+        return self.consecutive_missing_frames > 35
 
 
 class CandidateStateManager:
@@ -156,74 +156,77 @@ class CandidateStateManager:
         observed_track_ids = {obs.track_id: obs for obs in observations}
         matched_candidate_ids: set[str] = set()
 
-        # 1. Match known tracker IDs
+        # 1. Match known tracker IDs with spatial anchor sanity check
         for track_id, obs in observed_track_ids.items():
             cand_id = self.track_to_candidate_id.get(track_id)
             if cand_id and cand_id in self.candidates:
                 state = self.candidates[cand_id]
-                state.current_observation = obs
-                state.last_seen_timestamp_sec = timestamp_sec
-                state.last_seen_frame_idx = frame_idx
-                state.consecutive_missing_frames = 0
-                state.total_observations_count += 1
-                state.active_tracker_id = track_id
-                matched_candidate_ids.add(cand_id)
-
-        # 2. Re-associate dropped tracks using immutable seat anchors
-        unmatched_obs = [obs for tid, obs in observed_track_ids.items() if tid not in self.track_to_candidate_id]
-        
-        for obs in unmatched_obs:
-            best_candidate_id = None
-            min_normalized_dist = float("inf")
-
-            for cand_id, state in self.candidates.items():
-                if cand_id in matched_candidate_ids or state.identity.is_invigilator:
-                    continue
-
-                # Measure Mahalanobis/scale-normalized distance to immutable seat anchor
-                anchor_cx, anchor_cy = state.identity.anchor_center_norm
-                anchor_bw, anchor_bh = state.identity.anchor_box_size_norm
+                anc_cx, anc_cy = state.identity.anchor_center_norm
                 obs_cx, obs_cy = obs.center_norm
+                if np.hypot(obs_cx - anc_cx, obs_cy - anc_cy) <= 0.22:
+                    state.current_observation = obs
+                    state.last_seen_timestamp_sec = timestamp_sec
+                    state.last_seen_frame_idx = frame_idx
+                    state.consecutive_missing_frames = 0
+                    state.total_observations_count += 1
+                    state.active_tracker_id = track_id
+                    matched_candidate_ids.add(cand_id)
 
-                dx = (obs_cx - anchor_cx) / anchor_bw
-                dy = (obs_cy - anchor_cy) / anchor_bh
-                dist = np.hypot(dx, dy)
+        # 2. Re-associate dropped tracks using immutable seat anchors via greedy bipartite matching
+        unmatched_obs = [
+            obs for tid, obs in observed_track_ids.items()
+            if self.track_to_candidate_id.get(tid) not in matched_candidate_ids
+        ]
+        
+        unmatched_candidates = [
+            (c_id, st) for c_id, st in self.candidates.items()
+            if c_id not in matched_candidate_ids and not st.identity.is_invigilator
+        ]
 
-                if dist < min_normalized_dist and dist <= self.max_reid_distance_ratio:
-                    min_normalized_dist = dist
-                    best_candidate_id = cand_id
+        candidate_obs_pairs = []
+        for obs in unmatched_obs:
+            obs_cx, obs_cy = obs.center_norm
+            for c_id, st in unmatched_candidates:
+                anc_cx, anc_cy = st.identity.anchor_center_norm
+                dist = np.hypot(obs_cx - anc_cx, obs_cy - anc_cy)
+                if dist <= 0.22:
+                    candidate_obs_pairs.append((dist, obs, c_id))
 
-            if best_candidate_id:
-                # Re-associated successfully to the locked seat anchor
-                state = self.candidates[best_candidate_id]
-                state.current_observation = obs
-                state.last_seen_timestamp_sec = timestamp_sec
-                state.last_seen_frame_idx = frame_idx
-                state.consecutive_missing_frames = 0
-                state.total_observations_count += 1
-                state.active_tracker_id = obs.track_id
-                self.track_to_candidate_id[obs.track_id] = best_candidate_id
-                matched_candidate_ids.add(best_candidate_id)
-            else:
-                # Dynamically register candidate anchor so no person is ever ignored
-                new_state = self.register_candidate_anchor(obs.track_id, obs.bbox_xyxy_norm)
-                new_state.current_observation = obs
-                new_state.last_seen_timestamp_sec = timestamp_sec
-                new_state.last_seen_frame_idx = frame_idx
-                new_state.total_observations_count = 1
-                if self.is_finalized:
-                    new_state.identity.lock_status = IdentityLockStatus.IDENTITY_UNCERTAIN
-                    obs.metadata["identity_status"] = IdentityLockStatus.IDENTITY_UNCERTAIN.value
-                matched_candidate_ids.add(new_state.identity.candidate_id)
+        candidate_obs_pairs.sort(key=lambda x: x[0])
+        used_obs_ids = set()
+        for dist, obs, c_id in candidate_obs_pairs:
+            if obs.track_id in used_obs_ids or c_id in matched_candidate_ids:
+                continue
+            used_obs_ids.add(obs.track_id)
+            matched_candidate_ids.add(c_id)
+            state = self.candidates[c_id]
+            state.current_observation = obs
+            state.last_seen_timestamp_sec = timestamp_sec
+            state.last_seen_frame_idx = frame_idx
+            state.consecutive_missing_frames = 0
+            state.total_observations_count += 1
+            state.active_tracker_id = obs.track_id
+            self.track_to_candidate_id[obs.track_id] = c_id
 
-        # 3. Handle missed tracks
+        # 3. Only dynamically register candidate anchors during warmup frames!
+        if not self.is_finalized:
+            for obs in unmatched_obs:
+                if obs.track_id not in used_obs_ids:
+                    new_state = self.register_candidate_anchor(obs.track_id, obs.bbox_xyxy_norm)
+                    new_state.current_observation = obs
+                    new_state.last_seen_timestamp_sec = timestamp_sec
+                    new_state.last_seen_frame_idx = frame_idx
+                    new_state.total_observations_count = 1
+                    matched_candidate_ids.add(new_state.identity.candidate_id)
+
+        # 4. Handle missed tracks
         for cand_id, state in self.candidates.items():
             if cand_id not in matched_candidate_ids:
                 state.consecutive_missing_frames += 1
-                if state.consecutive_missing_frames > 25 and state.identity.lock_status == IdentityLockStatus.LOCKED:
+                if state.consecutive_missing_frames > 45 and state.identity.lock_status == IdentityLockStatus.LOCKED:
                     state.identity.lock_status = IdentityLockStatus.IDENTITY_UNCERTAIN
 
-        # 4. Finalize locks after warmup
+        # 5. Finalize locks after warmup
         if not self.is_finalized and self.current_frame >= self.warmup_frames:
             self.finalize_immutable_registry()
 

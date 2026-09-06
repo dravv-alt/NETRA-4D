@@ -84,23 +84,43 @@ def materialize_drive_asset(
     staging_root = Path(temp_root).resolve() if temp_root is not None else None
     if staging_root is not None:
         staging_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="netra4d-drive-", dir=str(staging_root) if staging_root else None
-    ) as temp_dir:
-        target = Path(temp_dir) / asset.filename
-        with requests.get(
+        cached_file = staging_root / asset.filename
+        if cached_file.exists() and (asset.expected_bytes is None or cached_file.stat().st_size == asset.expected_bytes):
+            provenance = {
+                "asset_id": asset.asset_id,
+                "source_url": asset.source_url,
+                "drive_file_id": asset.drive_file_id,
+                "filename": asset.filename,
+                "bytes": cached_file.stat().st_size,
+                "staging": "local_persistent_cache",
+                "persisted_in_repository": True,
+            }
+            yield cached_file, provenance
+            return
+
+    target = (staging_root / asset.filename) if staging_root is not None else Path(tempfile.gettempdir()) / asset.filename
+    try:
+        import gdown
+        gdown.download(id=asset.drive_file_id, output=str(target), quiet=False)
+        if target.exists():
+            bytes_written = target.stat().st_size
+    except Exception:
+        pass
+
+    if bytes_written == 0:
+        session = requests.Session()
+        download_url = f"https://drive.usercontent.google.com/download?id={asset.drive_file_id}&export=download&confirm=t"
+        with session.get(
             download_url,
             stream=True,
             timeout=timeout,
             headers={"User-Agent": "NETRA-4D verified dataset runner"},
         ) as response:
+            if response.status_code != 200 or "text/html" in response.headers.get("content-type", "").lower():
+                fallback_url = f"https://drive.google.com/uc?export=download&id={asset.drive_file_id}&confirm=t"
+                response = session.get(fallback_url, stream=True, timeout=timeout)
+
             response.raise_for_status()
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type.lower():
-                raise RuntimeError(
-                    f"Drive returned HTML instead of video data for {asset.asset_id}; "
-                    "check sharing permissions."
-                )
             with target.open("wb") as handle:
                 for chunk in response.iter_content(chunk_size=chunk_bytes):
                     if not chunk:

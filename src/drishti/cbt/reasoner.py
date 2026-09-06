@@ -33,6 +33,8 @@ class AtomicEventType(str, Enum):
     HAND_CROSSES_SEAT_BOUNDARY = "HAND_CROSSES_SEAT_BOUNDARY"
     MUTUAL_ATTENTION = "MUTUAL_ATTENTION"
     NORMAL_INPUT_ACTIVITY = "NORMAL_INPUT_ACTIVITY"
+    DUAL_HAND_DESK_MANIPULATION = "DUAL_HAND_DESK_MANIPULATION"
+    CHIT_DESK_PLACEMENT = "CHIT_DESK_PLACEMENT"
     STATIC_WORKSTATION_OBJECT = "STATIC_WORKSTATION_OBJECT"
     TRACK_OCCLUSION = "TRACK_OCCLUSION"
 
@@ -427,6 +429,17 @@ class CBTBehaviouralReasoner:
                 AtomicEventType.NORMAL_INPUT_ACTIVITY, (candidate_id,), timestamp, 0.85,
                 station.workstation_id, uncertainty=0.15,
             ))
+        elif len(wrists) >= 2:
+            # Check if both hands are resting/interacting on the desk outside normal keyboard/mouse
+            w1, w2 = wrists[0], wrists[1]
+            dist = float(np.hypot(w1[0] - w2[0], w1[1] - w2[1]))
+            on_desk = any(self._inside(station.desk, p) for p in (w1, w2)) if station.desk else True
+            if on_desk and dist < 0.12:  # Hands closely cupped/converged together on desk
+                evidence.append(AtomicEvidence(
+                    AtomicEventType.DUAL_HAND_DESK_MANIPULATION, (candidate_id,), timestamp, 0.80,
+                    station.workstation_id, uncertainty=0.20,
+                    details={"wrist_distance": round(dist, 4), "dual_hand_cupped": True}
+                ))
         for point in wrists:
             if not station.seat.contains(point):
                 target_station = next(
@@ -651,6 +664,18 @@ class CBTBehaviouralReasoner:
                 if target_candidate is not None:
                     edge = self.edges.setdefault((candidate_id, target_candidate), InteractionEdge(candidate_id, target_candidate, boundary.target_workstation_id or "UNKNOWN"))
                     edge.hand_boundary_count += 1
+
+            dual_hand = next((item for item in items if item.event_type == AtomicEventType.DUAL_HAND_DESK_MANIPULATION), None)
+            disengaged = next((item for item in items if item.event_type == AtomicEventType.OWN_SCREEN_DISENGAGEMENT), None)
+            if dual_hand and (disengaged or hand_below or chit):
+                event = self._emit(
+                    timestamp, "DESK_CHIT_MANIPULATION_REVIEW", "DESK CHIT / PAPER MANIPULATION REVIEW",
+                    (candidate_id,), 0.82, timestamp - 0.5, 0.20,
+                    ("calibrated desk", "dual-wrist convergence", "non-input desk interaction", "screen disengagement"),
+                    {"details": dual_hand.details, "station": self.last_bindings[candidate_id].workstation_id}
+                )
+                if event:
+                    output.append(event)
 
         for (source, target), edge in list(self.edges.items()):
             reverse = self.edges.get((target, source))

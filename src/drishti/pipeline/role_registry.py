@@ -164,14 +164,21 @@ class ImmutableRoleRegistry:
                 mean_bh = max(0.01, float(np.mean(sizes[:, 1])))
                 mean_ar = mean_bh / mean_bw
 
-                # Net translation from start to end of observation
+                # Net translation from start to end of observation (normalized coordinates)
                 net_disp = float(np.linalg.norm(pts[-1] - pts[0]))
                 
-                # Total peak-to-peak dispersion normalized by the person's own body dimensions
-                body_disp = float(np.hypot(np.ptp(pts[:, 0]) / mean_bw, np.ptp(pts[:, 1]) / mean_bh))
+                # Peak-to-peak dispersion in X and Y
+                ptp_x = float(np.ptp(pts[:, 0]))
+                ptp_y = float(np.ptp(pts[:, 1]))
+                total_disp = float(np.hypot(ptp_x, ptp_y))
 
-                # True roaming requires net translation exceeding their body height AND high normalized body dispersion AND upright standing aspect ratio
-                is_standing_roamer = (net_disp > mean_bh * 1.5) and (body_disp > 2.0) and (mean_ar >= 1.85)
+                # Invigilator heuristic:
+                # 1. Walking roamer: moves significantly across aisles (total_disp > 0.05 or net_disp > 0.04) with upright standing ratio (mean_ar >= 1.55)
+                # 2. Tall standing person: full-body standing in view (mean_bh >= 0.48 and mean_ar >= 1.6)
+                is_standing_roamer = (
+                    ((total_disp > 0.05 or net_disp > 0.04) and mean_ar >= 1.55) or
+                    (mean_bh >= 0.48 and mean_ar >= 1.60)
+                )
 
                 if is_standing_roamer:
                     entity.role = RoleEnum.INVIGILATOR
@@ -195,19 +202,24 @@ class ImmutableRoleRegistry:
         if ent.is_immutable and ent.role != RoleEnum.UNKNOWN:
             return ent.role
 
-        # Dynamic scale-invariant check during warmup
-        if len(ent.trajectory_positions) >= 8:
+        # Dynamic check during warmup
+        if len(ent.trajectory_positions) >= 5:
             pts = np.array(ent.trajectory_positions)
             sizes = np.array(getattr(ent, "trajectory_sizes", [(0.1, 0.2)] * len(pts)))
             mean_bw = max(0.01, float(np.mean(sizes[:, 0])))
             mean_bh = max(0.01, float(np.mean(sizes[:, 1])))
             mean_ar = mean_bh / mean_bw
             net_disp = float(np.linalg.norm(pts[-1] - pts[0]))
-            body_disp = float(np.hypot(np.ptp(pts[:, 0]) / mean_bw, np.ptp(pts[:, 1]) / mean_bh))
-            if (net_disp > mean_bh * 1.5) and (body_disp > 2.0) and (mean_ar >= 1.85):
+            ptp_x = float(np.ptp(pts[:, 0]))
+            ptp_y = float(np.ptp(pts[:, 1]))
+            total_disp = float(np.hypot(ptp_x, ptp_y))
+            if (((total_disp > 0.05 or net_disp > 0.04) and mean_ar >= 1.55) or
+                (mean_bh >= 0.48 and mean_ar >= 1.60)):
+                ent.role = RoleEnum.INVIGILATOR
                 return RoleEnum.INVIGILATOR
 
         return RoleEnum.CANDIDATE
 
     def is_invigilator(self, track_id: int) -> bool:
         return self.get_role_for_track(track_id) == RoleEnum.INVIGILATOR
+
