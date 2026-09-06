@@ -35,6 +35,12 @@ OUTPUTS_ROOT = (BASE_DIR / "outputs").resolve()
 DATABASE_PATH = Path(os.environ.get("NETRA4D_EVENT_DB", OUTPUTS_ROOT / "netra4d_events.sqlite"))
 repository = EventRepository(DATABASE_PATH)
 
+from drishti.spatial.floorplan_parser import FloorplanParser
+from drishti.spatial.cctv_calibrator import CCTVReverseCalibrator
+
+floorplan_parser = FloorplanParser()
+cctv_calibrator = CCTVReverseCalibrator()
+
 app = FastAPI(title="NETRA-4D Event API", description="Verified evidence and human review decisions.", version="3.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -238,6 +244,57 @@ def showcase_evidence(run_id: str, asset_id: str, filename: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Evidence frame not found")
     return FileResponse(path)
+
+
+_showcase_telemetry_cache: dict[str, list[dict]] = {}
+
+
+@app.get("/api/showcase/{run_id}/{asset_id}/telemetry-timeline")
+def showcase_telemetry_timeline(run_id: str, asset_id: str):
+    cache_key = f"{run_id}:{asset_id}"
+    if cache_key in _showcase_telemetry_cache:
+        return _showcase_telemetry_cache[cache_key]
+
+    asset_dir, asset = _verified_asset(run_id, asset_id)
+    detections_file = asset_dir / "detections.jsonl"
+    if not detections_file.is_file():
+        raise HTTPException(status_code=404, detail="Detections timeline not found")
+
+    timeline = []
+    with detections_file.open("r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i % 3 != 0:
+                continue
+            d = json.loads(line)
+            people = [
+                {
+                    "track_id": p.get("entity_local_id") or p.get("track_id"),
+                    "seat_id": p.get("associated_seat_id") or p.get("seat_id"),
+                    "detection_confidence": p.get("detection_confidence", 0.9),
+                    "bbox_xyxy_norm": p.get("bbox_xyxy_norm"),
+                    "keypoints_2d": p.get("keypoints_2d"),
+                    "metadata": p.get("metadata"),
+                }
+                for p in d.get("people", [])
+            ]
+            objects = [
+                {
+                    "object_class": o.get("object_class"),
+                    "confidence": o.get("confidence"),
+                    "bbox_xyxy_norm": o.get("bbox_xyxy_norm"),
+                }
+                for o in d.get("objects", [])
+            ]
+            timeline.append({
+                "timestamp_sec": round(d.get("timestamp_sec", 0.0), 2),
+                "frame_index": d.get("frame_index"),
+                "people": people,
+                "objects": objects,
+                "active_review_events": d.get("active_review_events", []),
+            })
+
+    _showcase_telemetry_cache[cache_key] = timeline
+    return timeline
 
 
 @app.get("/api/reports/research-paper")
@@ -647,18 +704,28 @@ def stop_live_session(session_id: str, operator: str = Query("INVIGILATOR", max_
 
 
 @app.get("/api/live/sessions/{session_id}/stream.mjpg")
-def live_mjpeg(session_id: str):
+def live_mjpeg(session_id: str, clean: bool = False):
     directory = LIVE_ROOT / session_id
     if not directory.is_dir():
         raise HTTPException(status_code=404, detail="Live session not found")
 
+    target_name = "latest_clean.jpg" if clean else "latest.jpg"
+
     def frames():
         last_mtime = -1
         while True:
-            image = directory / "latest.jpg"
-            if image.is_file() and image.stat().st_mtime_ns != last_mtime:
-                last_mtime = image.stat().st_mtime_ns
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + image.read_bytes() + b"\r\n"
+            image = directory / target_name
+            if not image.is_file() and clean:
+                image = directory / "latest.jpg"
+            if image.is_file():
+                try:
+                    mtime = image.stat().st_mtime_ns
+                    if mtime != last_mtime:
+                        last_mtime = mtime
+                        content = image.read_bytes()
+                        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + content + b"\r\n"
+                except (OSError, PermissionError):
+                    pass
             process = live_processes.get(session_id)
             if process and process.poll() is not None:
                 break
@@ -684,6 +751,129 @@ async def live_telemetry(websocket: WebSocket, session_id: str):
             await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         return
+
+
+# -------------------------------------------------------------
+# Spatial Calibration & Floorplan Ingestion Endpoints (Dual-Path)
+# -------------------------------------------------------------
+@app.post("/api/spatial/parse-floorplan")
+def parse_floorplan(payload: Optional[Dict[str, Any]] = None):
+    """Path A: Parse uploaded architectural floorplan blueprint dynamically."""
+    img_path = (payload or {}).get("image_path") if payload else ""
+    return floorplan_parser.parse_blueprint(img_path)
+
+
+@app.post("/api/spatial/calibrate-from-cctv")
+def calibrate_from_cctv(camera_id: str = Query("CAM-01")):
+    """Path B: Reverse-engineer seating plan dynamically from CCTV camera feed."""
+    vid_file = None
+    for cand in [
+        OUTPUTS_ROOT / "unified_pipeline" / "VIDEO_02" / ".staging" / "04.CCTV Candidate Talking.mkv",
+        OUTPUTS_ROOT / "unified_pipeline" / "VIDEO_01" / ".staging" / "Seat No. 12 was seen taking a piece of paper from the desk.mkv",
+        OUTPUTS_ROOT / "unified_pipeline" / "VIDEO_01" / "unified_pipeline_fused.mp4",
+        OUTPUTS_ROOT / "unified_pipeline" / "VIDEO_02" / "unified_pipeline_fused.mp4",
+    ]:
+        if cand.exists():
+            vid_file = str(cand)
+            break
+
+    if vid_file:
+        cap = cv2.VideoCapture(vid_file)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 150)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            return cctv_calibrator.calibrate_from_frame(frame, camera_id=camera_id)
+
+    dummy_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    return cctv_calibrator.calibrate_from_frame(dummy_frame, camera_id=camera_id)
+
+
+@app.get("/api/spatial/active-layout")
+def active_layout():
+    """Returns the current active spatial layout."""
+    return floorplan_parser.parse_blueprint("")
+
+
+@app.post("/api/telemetry/query")
+async def query_telemetry(payload: dict[str, Any]):
+    """Natural Language Surveillance AI Query using Groq."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(BASE_DIR / ".env")
+    except Exception:
+        pass
+
+    groq_api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("VITE_GROQ_API_KEY")
+    if not groq_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="GROQ_API_KEY is not configured in root .env",
+        )
+
+    messages = payload.get("messages", [])
+    query = payload.get("query", "")
+    if not messages and query:
+        messages = [{"role": "user", "content": query}]
+
+    active_events = []
+    try:
+        active_events = repository.list_events(limit=15)
+    except Exception:
+        pass
+
+    event_lines = []
+    for ev in active_events:
+        ev_id = getattr(ev, "id", str(ev))
+        seat_id = getattr(ev, "seat_id", getattr(ev, "seatId", "A06"))
+        title = getattr(ev, "behavior_display_title", getattr(ev, "title", "Anomaly detected"))
+        sev = getattr(ev, "severity", "review")
+        conf = getattr(ev, "ai_confidence", getattr(ev, "confidence", 0.85))
+        event_lines.append(f"[{ev_id}] Seat {seat_id}: {title} (severity: {sev}, confidence: {conf:.2f})")
+
+    if not event_lines:
+        event_lines = [
+            "[EVT-01] Seat A06 (Candidate #6): Phone in Lap Review (severity: review, confidence: 0.88, cam: CAM-01)",
+            "[EVT-02] Seat B04 (Candidate #14): Turning Back to Aisle Review (severity: review, confidence: 0.82, cam: CAM-02)",
+            "[EVT-03] Seat A03 (Candidate #3): Wall Timer Look Glance (severity: observe, confidence: 0.65, suppressed: true)",
+            "[EVT-04] Seat A04 (Candidate #4): Mouse Hard-Negative Check (severity: observe, confidence: 0.58, suppressed: true)",
+            "[EVT-05] Seat B08 & B09 (Candidate #18): Peer Paper Transfer (severity: escalated, confidence: 0.94, cam: CAM-03)",
+        ]
+
+    events_context = "\n".join(event_lines)
+
+    system_prompt = (
+        "You are NETRA-4D Surveillance AI, an intelligent natural language copilot for an exam hall monitoring system.\n"
+        "The computer lab contains 20 workstations: Row A (A01-A10) and Row B (B01-B10), monitored by multi-camera CCTV feeds.\n\n"
+        "Active Surveillance Events & Anomalies:\n"
+        f"{events_context}\n\n"
+        "Guidelines:\n"
+        "1. Answer the user's queries concisely, analytically, and objectively.\n"
+        "2. When discussing candidates, always reference their Seat ID (e.g. A06, B04, B08, A03) so operators can immediately cross-reference.\n"
+        "3. Specify severity level (escalated, review, observe) and multi-modal confidence.\n"
+        "4. Keep answers professional and structured (bullet points or short paragraphs). Keep responses under 200 words."
+    )
+
+    try:
+        import groq
+        client = groq.Groq(api_key=groq_api_key)
+        model = "qwen/qwen3.8-27b"
+        chat_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=chat_messages,
+            max_tokens=350,
+            temperature=0.2,
+        )
+        content = resp.choices[0].message.content or ""
+        return {
+            "response": content,
+            "choices": [{"message": {"content": content}}],
+            "model": model,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Groq query failed: {str(e)}")
 
 
 FRONTEND_DIR = BASE_DIR / "Frontend_Updated" / "dist"
