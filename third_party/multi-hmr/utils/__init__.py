@@ -12,13 +12,20 @@ from .camera import (
 
 from .image import normalize_rgb, unpatch, denormalize_rgb
 
-from .render import (
-    render_meshes,
-    print_distance_on_image,
-    render_side_views,
-    create_scene,
-    OPENCV_TO_OPENGL_CAMERA_CONVENTION,
-)
+try:
+    from .render import (
+        render_meshes,
+        print_distance_on_image,
+        render_side_views,
+        create_scene,
+        OPENCV_TO_OPENGL_CAMERA_CONVENTION,
+    )
+except ImportError:
+    render_meshes = None
+    print_distance_on_image = None
+    render_side_views = None
+    create_scene = None
+    OPENCV_TO_OPENGL_CAMERA_CONVENTION = None
 
 from .tensor_manip import rebatch, pad, pad_to_max
 

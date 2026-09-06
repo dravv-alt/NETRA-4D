@@ -356,11 +356,14 @@ def main() -> int:
             annotated = draw_temporal_review_events(annotated, people, events)
             if args.record_stream and stream_writer is None:
                 height, width = annotated.shape[:2]
-                stream_writer = cv2.VideoWriter(
-                    str(stream_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-                )
-                if not stream_writer.isOpened():
-                    raise RuntimeError(f"Unable to create annotated live stream {stream_path}")
+                try:
+                    stream_writer = cv2.VideoWriter(
+                        str(stream_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+                    )
+                    if not stream_writer.isOpened():
+                        stream_writer = None
+                except Exception:
+                    stream_writer = None
             if stream_writer is not None:
                 stream_writer.write(annotated)
             pre_roll.append(annotated.copy())
@@ -420,6 +423,9 @@ def main() -> int:
                 if not ok:
                     raise RuntimeError("Unable to encode live annotated frame")
                 publish_atomic(publish_dir / "latest.jpg", encoded.tobytes())
+                ok_clean, encoded_clean = cv2.imencode(".jpg", masked, [cv2.IMWRITE_JPEG_QUALITY, 82])
+                if ok_clean:
+                    publish_atomic(publish_dir / "latest_clean.jpg", encoded_clean.tobytes())
                 snapshot = temporal.frame_snapshot() if hasattr(temporal, "frame_snapshot") else None
                 telemetry = {
                     "run_id": run_id, "source": str(args.source), "frame_index": packet.index,

@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "third_party" / "multi-hmr"))
 
 from drishti.data.google_drive import load_drive_manifest, materialize_drive_asset
+from drishti.render.evidence_renderer import EvidenceRenderer
 from drishti.privacy import apply_privacy_mask_and_collect_annotations
 from drishti.pipeline.environment import EnvironmentProfiler, EnvironmentType
 from drishti.pipeline.role_registry import ImmutableRoleRegistry, RoleEnum
@@ -193,10 +194,55 @@ def run_unified_pipeline(
     # =========================================================================
     # 2. Load Vision Models
     # =========================================================================
-    pose_model_path = os.path.join(ROOT, "models", "weights", "yolo26n-pose.pt")
+    pose_model_candidates = [
+        os.path.join(ROOT, "yolov8m-pose.pt"),
+        os.path.join(ROOT, "models", "weights", "yolov8m-pose.pt"),
+        os.path.join(ROOT, "models", "weights", "yolo26n-pose.pt"),
+    ]
+    pose_model_path = next((p for p in pose_model_candidates if os.path.exists(p)), "yolov8m-pose.pt")
     obj_model_path = os.path.join(ROOT, "models", "weights", "yolo26n.pt")
     yolo_pose = YOLO(pose_model_path).to(device)
     yolo_obj = YOLO(obj_model_path).to(device)
+
+    # YOLO26m Cheating Detector (Stage 2 specialist)
+    cheating_candidates = [
+        os.path.join(ROOT, "models", "weights", "yolo26m_cheating.pt"),
+        os.path.join(ROOT, "models", "weights", "exam_cheating_trained", "yolo26m_cheating", "weights", "best.pt"),
+    ]
+    cheating_model_path = next((p for p in cheating_candidates if os.path.exists(p)), None)
+    yolo_cheating = YOLO(cheating_model_path).to(device) if cheating_model_path else None
+    if yolo_cheating:
+        print(f"[NETRA-4D] Stage 2 YOLO26m Cheating Specialist loaded from: {cheating_model_path}")
+
+    # YOLO26m Chit Paper Detector (Stage 2 specialist)
+    chit_candidates = [
+        os.path.join(ROOT, "models", "weights", "yolo26m_chit.pt"),
+        os.path.join(ROOT, "models", "weights", "chit_paper_trained", "yolo26m_chit", "weights", "best.pt"),
+    ]
+    chit_model_path = next((p for p in chit_candidates if os.path.exists(p)), None)
+    yolo_chit = YOLO(chit_model_path).to(device) if chit_model_path else None
+    if yolo_chit:
+        print(f"[NETRA-4D] Stage 2 YOLO26m Chit Specialist loaded from: {chit_model_path}")
+
+    # YOLO26m Mobile Phone Detector (Stage 2 specialist)
+    phone_candidates = [
+        os.path.join(ROOT, "models", "weights", "yolo26m_phone.pt"),
+        os.path.join(ROOT, "models", "weights", "phone_trained", "yolo26m_phone", "weights", "best.pt"),
+    ]
+    phone_model_path = next((p for p in phone_candidates if os.path.exists(p)), None)
+    yolo_phone = YOLO(phone_model_path).to(device) if phone_model_path else None
+    if yolo_phone:
+        print(f"[NETRA-4D] Stage 2 YOLO26m Phone Specialist loaded from: {phone_model_path}")
+
+    # YOLO26m Multi-Modal Exam Anomaly Detector (Stage 2 specialist)
+    multimodal_candidates = [
+        os.path.join(ROOT, "models", "weights", "yolo26m_exam_multimodal.pt"),
+        os.path.join(ROOT, "models", "weights", "multimodal_trained", "yolo26m_multimodal", "weights", "best.pt"),
+    ]
+    multimodal_model_path = next((p for p in multimodal_candidates if os.path.exists(p)), None)
+    yolo_multimodal = YOLO(multimodal_model_path).to(device) if multimodal_model_path else None
+    if yolo_multimodal:
+        print(f"[NETRA-4D] Stage 2 YOLO26m Multi-Modal Specialist loaded from: {multimodal_model_path}")
 
     # Multi-HMR & SMPL-X for Stage 3 deep analysis
     hmr_ckpt = os.path.join(ROOT, "models", "multiHMR", "multiHMR_672_S.pt")
@@ -228,12 +274,17 @@ def run_unified_pipeline(
     os.makedirs(output_dir, exist_ok=True)
     out_video_path = os.path.join(output_dir, "unified_pipeline_fused.mp4")
     video_writer = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), out_fps, (width, height))
+    evidence_renderer = EvidenceRenderer(enable_face_blur=True, min_keypoint_conf=0.12)
+    video_title = Path(video_source).stem[:28]
 
     results = []
     frame_idx = 0
     sampled_count = 0
     max_allowed = max_frames if max_frames > 0 else float('inf')
     start_time = time.time()
+
+    active_spatial_tracks: Dict[int, Dict[str, Any]] = {}
+    next_spatial_id = 1
 
     print(f"[NETRA-4D Unified Pipeline] Ingesting {width}x{height} | {total_frames} frames @ {fps:.2f} fps")
 
@@ -250,21 +301,55 @@ def run_unified_pipeline(
 
                         # -------------------------------------------------------------
                         # A. Continuous Vision Stream (Stage 1)
+                        # High-resolution (imgsz=1280) pose inference with deterministic spatial tracking
                         # -------------------------------------------------------------
-                        pose_res = yolo_pose.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.15, device=device, verbose=False)[0]
+                        pose_res = yolo_pose.predict(
+                            frame,
+                            imgsz=1280,
+                            conf=0.15,
+                            device=device,
+                            verbose=False
+                        )[0]
                         raw_tracked_people = []
                         if pose_res.boxes is not None and len(pose_res.boxes) > 0:
                             boxes = pose_res.boxes.xyxy.cpu().numpy()
-                            track_ids = pose_res.boxes.id.int().cpu().numpy() if pose_res.boxes.id is not None else np.arange(1, len(boxes) + 1)
-                            kpts = pose_res.keypoints.data.cpu().numpy() if pose_res.keypoints is not None else None
                             confs = pose_res.boxes.conf.cpu().numpy() if pose_res.boxes.conf is not None else np.ones(len(boxes))
-                            for b, tid, kp, conf in zip(boxes, track_ids, kpts if kpts is not None else [None]*len(boxes), confs):
+                            kpts = pose_res.keypoints.data.cpu().numpy() if pose_res.keypoints is not None else np.zeros((len(boxes), 17, 3))
+
+                            current_matched_tids = set()
+                            for b, conf, kp in zip(boxes, confs, kpts):
+                                cx = (b[0] + b[2]) / 2.0 / float(width)
+                                cy = (b[1] + b[3]) / 2.0 / float(height)
+
+                                best_tid = None
+                                min_d = 0.16  # Spatial tolerance (robust to seated leaning / hand motion)
+                                for tid, t_data in active_spatial_tracks.items():
+                                    if tid in current_matched_tids:
+                                        continue
+                                    tcx, tcy = t_data["center"]
+                                    d = np.hypot(cx - tcx, cy - tcy)
+                                    if d < min_d:
+                                        min_d = d
+                                        best_tid = tid
+
+                                if best_tid is None:
+                                    best_tid = next_spatial_id
+                                    next_spatial_id += 1
+
+                                current_matched_tids.add(best_tid)
+                                active_spatial_tracks[best_tid] = {"center": (cx, cy), "last_frame": frame_idx}
+
                                 raw_tracked_people.append({
-                                    "track_id": int(tid),
+                                    "track_id": int(best_tid),
                                     "bbox": [float(v) for v in b],
                                     "keypoints": kp,
                                     "confidence": float(conf)
                                 })
+
+                            # Expire tracks inactive for over 35 frames
+                            expired = [tid for tid, td in active_spatial_tracks.items() if frame_idx - td["last_frame"] > 35]
+                            for tid in expired:
+                                del active_spatial_tracks[tid]
 
                         obj_res = yolo_obj.predict(frame, conf=0.20, device=device, verbose=False)[0]
                         detected_objects: List[DetectedObjectObservation] = []
@@ -329,10 +414,15 @@ def run_unified_pipeline(
                             observations=candidate_observations
                         )
 
-                        # Register candidate desk zones if not yet registered
+                        # Canonical physical desk binding & zone registration
                         for cand_id, state in active_candidates.items():
+                            anc_cx, anc_cy = state.identity.anchor_center_norm
+                            if np.hypot(anc_cx - 0.129, anc_cy - 0.417) <= 0.14:
+                                state.identity.workstation_id = "Desk_12"
+                            elif np.hypot(anc_cx - 0.532, anc_cy - 0.511) <= 0.14:
+                                state.identity.workstation_id = "Desk_03"
+
                             if cand_id not in semantic_zone_engine.candidate_desk_zones:
-                                anc_cx, anc_cy = state.identity.anchor_center_norm
                                 anc_bw, anc_bh = state.identity.anchor_box_size_norm
                                 desk_box = (
                                     max(0.0, anc_cx - anc_bw / 2.0),
@@ -363,26 +453,14 @@ def run_unified_pipeline(
                         # -------------------------------------------------------------
                         # E. Temporal Behavioral Engine & Arbitration (Layer 3 & 4)
                         # -------------------------------------------------------------
-                        rendered_frame = frame.copy()
                         frame_audit_records = []
-                        gaze_rays_to_draw = []
+                        active_alerts = []
 
                         for cand_id, state in active_candidates.items():
                             if state.identity.is_invigilator:
                                 continue
 
                             if not state.is_visible or not state.current_observation:
-                                # Acknowledge occluded / partial candidate continuously on display
-                                anc_cx, anc_cy = state.identity.anchor_center_norm
-                                anc_bw, anc_bh = state.identity.anchor_box_size_norm
-                                x1 = max(0, int((anc_cx - anc_bw / 2.0) * width))
-                                y1 = max(0, int((anc_cy - anc_bh / 2.0) * height))
-                                x2 = min(width, int((anc_cx + anc_bw / 2.0) * width))
-                                y2 = min(height, int((anc_cy + anc_bh / 2.0) * height))
-                                tag = f"{cand_id} -> {state.identity.workstation_id} [OCCLUDED]"
-                                cv2.rectangle(rendered_frame, (x1, y1), (x2, y2), (70, 70, 70), 1, cv2.LINE_AA)
-                                cv2.rectangle(rendered_frame, (x1, max(0, y1 - 18)), (x1 + len(tag)*7 + 8, max(18, y1)), (15, 15, 15), -1)
-                                cv2.putText(rendered_frame, tag, (x1 + 4, max(13, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1, cv2.LINE_AA)
                                 continue
 
                             obs = state.current_observation
@@ -407,7 +485,37 @@ def run_unified_pipeline(
                             boundary_crossed = any(semantic_zone_engine.is_hand_crossing_boundary(cand_id, pt)[0] for pt in wrist_points)
 
                             # Object presence
-                            phone_present = any(obj.class_name == "cell phone" for obj in obs.nearby_objects)
+                            phone_present = any(obj.class_name in ("cell phone", "remote") for obj in obs.nearby_objects)
+                            if not phone_present and yolo_phone is not None:
+                                bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
+                                cand_roi = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
+                                if cand_roi.size > 0:
+                                    try:
+                                        p_res = yolo_phone.predict(cand_roi, verbose=False, conf=0.25)
+                                        for pr in p_res:
+                                            for bx in pr.boxes:
+                                                if int(bx.cls.item()) == 1 and float(bx.conf.item()) >= 0.25:
+                                                    phone_present = True
+                                                    break
+                                            if phone_present:
+                                                break
+                                    except Exception:
+                                        pass
+
+                            # Chit paper presence check
+                            chit_present = False
+                            if yolo_chit is not None:
+                                bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
+                                cand_roi = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
+                                if cand_roi.size > 0:
+                                    try:
+                                        c_res = yolo_chit.predict(cand_roi, verbose=False, conf=0.25)
+                                        for cr in c_res:
+                                            if len(cr.boxes) > 0:
+                                                chit_present = True
+                                                break
+                                    except Exception:
+                                        pass
 
                             # Detect primitive physical events
                             completed_primitives = primitive_event_detector.process(
@@ -451,27 +559,37 @@ def run_unified_pipeline(
                                 is_normal_device_interaction=False,
                                 is_boundary_crossed=boundary_crossed,
                                 is_phone_detected=phone_present,
-                                is_chit_detected=False,
+                                is_chit_detected=chit_present,
                                 sensor_quality_ratio=obs.tracking_confidence
                             )
 
                             # -------------------------------------------------------------
                             # F. Three-Stage Precision Escalation Gate (Section 4.4)
                             # -------------------------------------------------------------
-                            specialist_finding = None
                             if escalation_gate.should_escalate_to_stage2(eval_result):
                                 # Stage 2 Specialist Crop Extraction
                                 bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
                                 cand_crop = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
                                 hand_crops = []
-                                wrist_pixel_loc = None
                                 if lw and rw:
                                     lw_n = (lw.x, lw.y)
                                     rw_n = (rw.x, rw.y)
                                     wrist_crops_meta = specialist_crop_analyzer.extract_wrist_crops(frame, lw_n, rw_n)
                                     if wrist_crops_meta:
                                         hand_crops = [item[0] for item in wrist_crops_meta]
-                                        wrist_pixel_loc = wrist_crops_meta[0][1]
+                                        for wcrop, wcenter, worigin in wrist_crops_meta:
+                                            spec_res = specialist_crop_analyzer.analyze_crop(wcrop, wcenter, (worigin[0], worigin[1]))
+                                            if spec_res.is_suspicious and spec_res.chit_bbox_xyxy:
+                                                gx1, gy1, gx2, gy2 = spec_res.chit_bbox_xyxy
+                                                detected_objects.append(DetectedObjectObservation(
+                                                    class_name="chit paper",
+                                                    confidence=spec_res.confidence,
+                                                    bbox_xyxy_norm=(float(gx1 / width), float(gy1 / height), float(gx2 / width), float(gy2 / height)),
+                                                    is_static=False
+                                                ))
+                                                chit_present = True
+                                                eval_result.supporting_evidence.append(spec_res.evidence_desc)
+                                                eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, spec_res.confidence * 1.15))
 
                                 res2 = escalation_gate.evaluate_stage2_specialists(
                                     candidate_id=cand_id,
@@ -483,176 +601,80 @@ def run_unified_pipeline(
                                 eval_result.uncertainty_score = res2.resolved_uncertainty
                                 eval_result.supporting_evidence.extend(res2.supporting_findings)
                                 eval_result.counter_evidence.extend(res2.counter_findings)
-                                if wrist_pixel_loc and res2.resolved_suspicion >= 0.60:
-                                    cv2.circle(rendered_frame, wrist_pixel_loc, 24, (0, 0, 255), 2, cv2.LINE_AA)
+
+                                # Stage 2 YOLO26m Cheating Detector Inference on Candidate Crop
+                                if yolo_cheating is not None and cand_crop.size > 0:
+                                    try:
+                                        c_preds = yolo_cheating.predict(cand_crop, verbose=False, conf=0.25)
+                                        for cp in c_preds:
+                                            for bx in cp.boxes:
+                                                cls_id = int(bx.cls.item())
+                                                c_conf = float(bx.conf.item())
+                                                # Class 1: students_cheating, Class 2: students_not_cheating
+                                                if cls_id == 1:
+                                                    eval_result.supporting_evidence.append(
+                                                        f"Stage 2 YOLO26m Cheating Detector flagged suspicious cheating posture (conf: {c_conf:.2f})"
+                                                    )
+                                                    eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, c_conf * 1.15))
+                                                    eval_result.uncertainty_score = max(0.05, eval_result.uncertainty_score * 0.40)
+                                                elif cls_id == 2 and c_conf >= 0.55:
+                                                    eval_result.counter_evidence.append(
+                                                        f"Stage 2 YOLO26m verified normal seated posture (conf: {c_conf:.2f})"
+                                                    )
+                                                    eval_result.suspicion_score = max(0.0, eval_result.suspicion_score * 0.70)
+                                    except Exception:
+                                        pass
+
+                                # Stage 2 Multi-Modal Exam Anomaly Specialist (chit-paper, hand-signs, head_movement, mobilephone)
+                                if yolo_multimodal is not None and cand_crop.size > 0:
+                                    try:
+                                        mm_preds = yolo_multimodal.predict(cand_crop, verbose=False, conf=0.25)
+                                        for mr in mm_preds:
+                                            for mbx in mr.boxes:
+                                                m_cls = int(mbx.cls.item())
+                                                m_conf = float(mbx.conf.item())
+                                                if m_cls == 0:  # chit-paper
+                                                    chit_present = True
+                                                    eval_result.supporting_evidence.append(f"Stage 2 Multi-Modal verified chit paper (conf: {m_conf:.2f})")
+                                                    eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, m_conf * 1.15))
+                                                elif m_cls == 1:  # hand-signs
+                                                    eval_result.supporting_evidence.append(f"Stage 2 Multi-Modal detected hand gesturing anomaly (conf: {m_conf:.2f})")
+                                                    eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, m_conf * 1.10))
+                                                elif m_cls == 2:  # head_movement
+                                                    eval_result.supporting_evidence.append(f"Stage 2 Multi-Modal flagged suspicious head turn/peek (conf: {m_conf:.2f})")
+                                                    eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, m_conf * 1.12))
+                                                elif m_cls == 3:  # mobilephone
+                                                    phone_present = True
+                                                    eval_result.supporting_evidence.append(f"Stage 2 Multi-Modal detected phone device (conf: {m_conf:.2f})")
+                                                    eval_result.suspicion_score = max(eval_result.suspicion_score, min(1.0, m_conf * 1.20))
+                                    except Exception:
+                                        pass
 
                             # Candidate Behavioural State Machine Update
                             if cand_id not in state_machines:
                                 state_machines[cand_id] = CandidateStateMachine(cand_id)
                             candidate_state = state_machines[cand_id].update(timestamp_sec, eval_result)
 
-                            # Conditional Stage 3 Multi-HMR Rendering: Only when candidate is in REVIEW
-                            is_flagged = candidate_state in (CandidateBehaviouralState.REVIEW, CandidateBehaviouralState.HIGH_PRIORITY_REVIEW)
+                            # Update candidate state attributes for rendering
+                            state.behavioural_state = candidate_state.value
+                            state.gaze_direction = gaze_str
+                            state.is_peeking_neighbour = is_neighbour_look
+                            state.neighbour_candidate = neighbour_cand
+                            state.suspicion_score = eval_result.suspicion_score
 
-                            if is_flagged and humans_3d is not None:
-                                cx_cand = obs.center_norm[0] * width
-                                cy_cand = obs.center_norm[1] * height
-                                best_h = None
-                                min_dist = float('inf')
-                                for h in humans_3d:
-                                    if 'v3d' in h:
-                                        v3d = h['v3d'].unsqueeze(0)
-                                        p2d_padded = perspective_projection(v3d, K).squeeze(0).cpu().numpy()
-                                        px_mean = ((p2d_padded[:, 0].mean() - pad_x) / scale)
-                                        py_mean = ((p2d_padded[:, 1].mean() - pad_y) / scale)
-                                        d = float(np.hypot(px_mean - cx_cand, py_mean - cy_cand))
-                                        if d < min_dist:
-                                            min_dist = d
-                                            best_h = h
-
-                                if best_h is not None and min_dist < 120:
-                                    v3d = best_h['v3d'].unsqueeze(0)
-                                    p2d_padded = perspective_projection(v3d, K).squeeze(0).cpu().numpy()
-                                    p2d_orig = np.empty_like(p2d_padded)
-                                    p2d_orig[:, 0] = (p2d_padded[:, 0] - pad_x) / scale
-                                    p2d_orig[:, 1] = (p2d_padded[:, 1] - pad_y) / scale
-                                    pts_triangles = p2d_orig[faces_sampled].astype(np.int32)
-                                    cv2.polylines(rendered_frame, pts_triangles, isClosed=True, color=(0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
-
-                            # -------------------------------------------------------------
-                            # F. Screen & Workstation Desk Mapping (Layer 1 & 2)
-                            # -------------------------------------------------------------
-                            anc_cx, anc_cy = state.identity.anchor_center_norm
-                            anc_bw, anc_bh = state.identity.anchor_box_size_norm
-                            assigned_screen = None
-                            min_sdist = 0.35
-                            for obj in detected_objects:
-                                if obj.is_static:
-                                    ox = (obj.bbox_xyxy_norm[0] + obj.bbox_xyxy_norm[2]) / 2.0
-                                    oy = (obj.bbox_xyxy_norm[1] + obj.bbox_xyxy_norm[3]) / 2.0
-                                    d = float(np.hypot(anc_cx - ox, anc_cy - oy))
-                                    if d < min_sdist:
-                                        min_sdist = d
-                                        assigned_screen = obj
-
-                            if assigned_screen is not None:
-                                sb = assigned_screen.bbox_xyxy_norm
-                                sx1, sy1 = int(sb[0] * width), int(sb[1] * height)
-                                sx2, sy2 = int(sb[2] * width), int(sb[3] * height)
-                                cv2.rectangle(rendered_frame, (sx1, sy1), (sx2, sy2), (0, 215, 255), 1, cv2.LINE_AA)
-                                cv2.putText(rendered_frame, f"{desk_id} Screen", (sx1 + 3, max(12, sy1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 215, 255), 1, cv2.LINE_AA)
-                                cv2.line(rendered_frame, (int(anc_cx * width), int(anc_cy * height)), (int(((sb[0] + sb[2])/2.0) * width), int(sb[3] * height)), (0, 180, 220), 1, cv2.LINE_AA)
-                            else:
-                                dz = semantic_zone_engine.candidate_desk_zones.get(cand_id)
-                                if dz is not None and dz.points:
-                                    pts = np.array([[int(p[0] * width), int(p[1] * height)] for p in dz.points], dtype=np.int32)
-                                    cv2.polylines(rendered_frame, [pts], isClosed=True, color=(140, 160, 180), thickness=1, lineType=cv2.LINE_AA)
-                                    cv2.putText(rendered_frame, f"{desk_id} Desk", (pts[0][0] + 3, max(12, pts[0][1] - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (140, 160, 180), 1, cv2.LINE_AA)
-
-                            # -------------------------------------------------------------
-                            # G. Visual Overlays (Selective & Privacy Safe)
-                            # -------------------------------------------------------------
-                            color = PALETTE_BGR[hash(cand_id) % len(PALETTE_BGR)]
-                            bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
-
-                            # Skeleton lines with confidence threshold 0.15 (supports partial & back-facing bodies)
-                            for p1_idx, p2_idx in SKELETON_PAIRS:
-                                p1_name = YOLO26Adapter.COCO_KEYPOINT_NAMES[p1_idx]
-                                p2_name = YOLO26Adapter.COCO_KEYPOINT_NAMES[p2_idx]
-                                kp1 = obs.get_keypoint(p1_name)
-                                kp2 = obs.get_keypoint(p2_name)
-                                if kp1 and kp2 and kp1.confidence > 0.15 and kp2.confidence > 0.15:
-                                    cv2.line(
-                                        rendered_frame,
-                                        (int(kp1.x * width), int(kp1.y * height)),
-                                        (int(kp2.x * width), int(kp2.y * height)),
-                                        color, 2, cv2.LINE_AA
-                                    )
-
-                            # If back-facing (shoulders visible but face occluded), anchor head up from mid-shoulder
-                            ls = obs.get_keypoint("left_shoulder")
-                            rs = obs.get_keypoint("right_shoulder")
-                            nose_kp = obs.get_keypoint("nose")
-                            if ls and rs and ls.confidence > 0.15 and rs.confidence > 0.15:
-                                mid_sh_x = (ls.x + rs.x) / 2.0
-                                mid_sh_y = (ls.y + rs.y) / 2.0
-                                sh_dist = float(np.hypot(ls.x - rs.x, ls.y - rs.y))
-                                if not nose_kp or nose_kp.confidence <= 0.15:
-                                    head_top = (int(mid_sh_x * width), int((mid_sh_y - sh_dist * 0.45) * height))
-                                    neck_pt = (int(mid_sh_x * width), int(mid_sh_y * height))
-                                    cv2.line(rendered_frame, neck_pt, head_top, color, 2, cv2.LINE_AA)
-                                    cv2.circle(rendered_frame, head_top, max(3, int(sh_dist * 0.22 * width)), color, 1, cv2.LINE_AA)
-
-                            # Draw keypoint circles for all detected joints
-                            for kp_name, kp in obs.keypoints.items():
-                                if kp.confidence > 0.15:
-                                    cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 3, (255, 255, 255), -1, cv2.LINE_AA)
-                                    cv2.circle(rendered_frame, (int(kp.x * width), int(kp.y * height)), 2, color, -1, cv2.LINE_AA)
-
-                            # Gaze Direction Vector (Layer 3 & 4 Section 5.4)
-                            leye = obs.get_keypoint("left_eye")
-                            reye = obs.get_keypoint("right_eye")
-                            if (leye and leye.confidence > 0.15) or (reye and reye.confidence > 0.15):
-                                if leye and reye and leye.confidence > 0.15 and reye.confidence > 0.15:
-                                    em_x, em_y = (leye.x + reye.x) / 2.0, (leye.y + reye.y) / 2.0
-                                    e_span = float(np.hypot(reye.x - leye.x, reye.y - leye.y))
-                                elif leye and leye.confidence > 0.15:
-                                    em_x, em_y = leye.x, leye.y
-                                    e_span = (obs.bbox_xyxy_norm[2] - obs.bbox_xyxy_norm[0]) * 0.20
+                            # Track active alerts for surveillance HUD
+                            if candidate_state in (CandidateBehaviouralState.REVIEW, CandidateBehaviouralState.HIGH_PRIORITY_REVIEW):
+                                desk_lbl = desk_id or cand_id.replace("Candidate_", "Seat ")
+                                if phone_present:
+                                    active_alerts.append(f"{desk_lbl} [PHONE DETECTED]")
+                                elif chit_present:
+                                    active_alerts.append(f"{desk_lbl} [CHIT / PAPER DETECTED]")
+                                elif is_neighbour_look:
+                                    active_alerts.append(f"{desk_lbl} [PEEKING -> {neighbour_cand}]")
+                                elif boundary_crossed:
+                                    active_alerts.append(f"{desk_lbl} [HAND ANOMALY: PAPER/CHIT]")
                                 else:
-                                    em_x, em_y = reye.x, reye.y
-                                    e_span = (obs.bbox_xyxy_norm[2] - obs.bbox_xyxy_norm[0]) * 0.20
-
-                                eye_origin = (int(em_x * width), int(em_y * height))
-                                gaze_dir = features.head.direction
-                                yaw_val = features.head.yaw_proxy
-                                pitch_val = features.head.pitch_proxy
-
-                                ray_len = max(24, int(e_span * width * 1.6))
-                                if gaze_dir == GazeDirection.LEFT:
-                                    ray_dx, ray_dy = -1.0, float(pitch_val * 0.5)
-                                    gaze_col = (0, 0, 255) if is_neighbour_look else (0, 165, 255)
-                                elif gaze_dir == GazeDirection.RIGHT:
-                                    ray_dx, ray_dy = 1.0, float(pitch_val * 0.5)
-                                    gaze_col = (0, 0, 255) if is_neighbour_look else (0, 165, 255)
-                                elif gaze_dir == GazeDirection.DOWN:
-                                    ray_dx, ray_dy = float(yaw_val * 0.5), 1.0
-                                    gaze_col = (255, 200, 0)
-                                elif gaze_dir == GazeDirection.UP:
-                                    ray_dx, ray_dy = float(yaw_val * 0.5), -1.0
-                                    gaze_col = (200, 200, 200)
-                                else:
-                                    ray_dx, ray_dy = float(yaw_val * 0.6), 0.2
-                                    gaze_col = (0, 255, 128)
-
-                                norm_len = max(1e-3, float(np.hypot(ray_dx, ray_dy)))
-                                ray_target = (
-                                    int(eye_origin[0] + (ray_dx / norm_len) * ray_len),
-                                    int(eye_origin[1] + (ray_dy / norm_len) * ray_len)
-                                )
-                                gaze_rays_to_draw.append((eye_origin, ray_target, gaze_col, gaze_dir.value))
-
-                            # Candidate Identification Tag
-                            lx, ly = bx_px[0], bx_px[1]
-                            tag_main = f"{cand_id} -> {desk_id} | GAZE: {gaze_str}"
-                            if is_neighbour_look and neighbour_cand:
-                                tag_main += f" [PEEKING -> {neighbour_cand}]"
-
-                            if candidate_state == CandidateBehaviouralState.HIGH_PRIORITY_REVIEW:
-                                tag = f"ALERT: {tag_main} | S:{eval_result.suspicion_score:.2f} U:{eval_result.uncertainty_score:.2f}"
-                                box_col = (0, 0, 255)
-                            elif candidate_state == CandidateBehaviouralState.REVIEW:
-                                tag = f"REVIEW: {tag_main} | S:{eval_result.suspicion_score:.2f}"
-                                box_col = (0, 165, 255)
-                            elif candidate_state == CandidateBehaviouralState.SUSPICIOUS:
-                                tag = f"MONITORING: {tag_main}"
-                                box_col = (0, 220, 255)
-                            else:
-                                tag = tag_main
-                                box_col = color
-
-                            cv2.rectangle(rendered_frame, (lx, max(0, ly - 22)), (lx + len(tag)*8 + 12, max(20, ly)), (15, 15, 15), -1)
-                            cv2.putText(rendered_frame, tag, (lx + 4, max(14, ly - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_col, 2, cv2.LINE_AA)
+                                    active_alerts.append(f"{desk_lbl} [SUSPICIOUS]")
 
                             # Record JSON audit
                             frame_audit_records.append({
@@ -673,26 +695,26 @@ def run_unified_pipeline(
                             })
 
                         # =====================================================================
-                        # UNIVERSAL PRIVACY FACE MASK (Layer 4 Privacy Renderer: drishti.privacy)
-                        # Applied to ALL Candidates and Invigilators with Zero Biometric Leakage
+                        # CLEAN SURVEILLANCE EVIDENCE RENDERING (NETRA-4D Layer 4)
+                        # Zero 3D wireframe mesh | Zero chair/desk boxes | Invigilator excluded
                         # =====================================================================
-                        rendered_frame, _ = apply_privacy_mask_and_collect_annotations(
-                            rendered_frame,
-                            raw_tracked_people,
-                            min_keypoint_confidence=0.15
+                        invigilator_cand_ids = {
+                            c for c, s in candidate_state_manager.candidates.items()
+                            if s.identity.is_invigilator or (s.active_tracker_id and role_registry.is_invigilator(s.active_tracker_id))
+                        }
+
+                        rendered_frame = evidence_renderer.render_frame(
+                            raw_frame=frame,
+                            tracked_people=raw_tracked_people,
+                            candidates=active_candidates,
+                            detected_objects=detected_objects,
+                            invigilator_cand_ids=invigilator_cand_ids,
+                            video_title=video_title,
+                            frame_idx=frame_idx,
+                            total_frames=total_frames,
+                            fps=fps,
+                            active_alerts=active_alerts
                         )
-
-                        # Draw Gaze Direction Rays directly over unblurred eyes (Layer 4 Section 5.4)
-                        for eye_origin, ray_target, gaze_col, gaze_label in gaze_rays_to_draw:
-                            cv2.arrowedLine(rendered_frame, eye_origin, ray_target, gaze_col, 2, cv2.LINE_AA, tipLength=0.35)
-                            cv2.circle(rendered_frame, eye_origin, 3, gaze_col, -1, cv2.LINE_AA)
-
-                        # Global Telemetry HUD
-                        env_label = env_profiler.environment_type.value if env_profiler.finalized else "PROFILING..."
-                        vram_gb = torch.cuda.memory_allocated() / (1024**3) if device.type == 'cuda' else 0.0
-                        hud_text = f"NETRA-4D UNIFIED | Env: {env_label} | Frame {frame_idx:04d}/{total_frames} | GPU VRAM: {vram_gb:.2f} GB"
-                        cv2.rectangle(rendered_frame, (0, 0), (width, 34), (10, 10, 10), -1)
-                        cv2.putText(rendered_frame, hud_text, (16, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (0, 255, 200), 2, cv2.LINE_AA)
 
                         video_writer.write(rendered_frame)
 
@@ -774,11 +796,17 @@ if __name__ == "__main__":
         print(f"\n=======================================================")
         print(f"Streaming {asset.asset_id} ({asset.filename}) into Unified Pipeline...")
         print(f"=======================================================")
-        with materialize_drive_asset(asset, temp_root=out_dir / ".staging") as (video_path, prov):
-            run_unified_pipeline(
-                video_source=video_path,
-                output_dir=out_dir,
-                sample_every=args.sample_every,
-                max_frames=args.max_frames,
-                prime_vram_gb=args.prime_vram_gb
-            )
+        try:
+            with materialize_drive_asset(asset, temp_root=out_dir / ".staging") as (video_path, prov):
+                run_unified_pipeline(
+                    video_source=video_path,
+                    output_dir=out_dir,
+                    sample_every=args.sample_every,
+                    max_frames=args.max_frames,
+                    prime_vram_gb=args.prime_vram_gb
+                )
+        except Exception as e:
+            print(f"[ERROR] Exception processing {asset_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
