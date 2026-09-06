@@ -1,4 +1,13 @@
-# Python Cache
+# Secrets & API Keys
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+!.env.example
+
+# Python Virtual Environments & Cache
+.venv*/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,18 +15,52 @@ __pycache__/
 # PyTest & Linters
 .pytest_cache/
 pytest-cache-files-*/
+.test-tmp/
 .ruff_cache/
 .mypy_cache/
 
 # Node Modules & Frontend Build
 Frontend_Updated/node_modules/
+Frontend_Updated/dist/
+web/node_modules/
+web/dist/
 
-# Files exceeding GitHub 100MB limit & Gigabyte Raw Output Dumps
-Final_Presentation.mp4
+# Large binaries, models & partial downloads
 *.zip
+*.pt
+*.pkl
+*.npz
+*.part
+*.crdownload
+models/multiHMR/
+models/smplx/
+models/models/
+models/weights/
+
+# Video outputs & recordings (Never commit video binaries)
 outputs/
-OUTPUT/netra4d_final_*
-OUTPUT/live_*
-OUTPUT/operational-report-browser-profile/
-PRELOADED_IMG_VID_DEMO/*.avi
-PRELOADED_IMG_VID_DEMO/*.mp4
+OUTPUT/
+output/
+output_videos/
+runs/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
+!tests/fixtures/**/annotated.mp4
+
+# Datasets & ephemeral staging
+dataset_gdrive/
+third_party/*.yolo26/
+third_party/*/*.yolo26/
+
+# Scratch & temporary evaluation artifacts
+scratch/
+scratch_eval/
+scratch_diag.py
+.system_generated/
+
+
