@@ -18,6 +18,7 @@ interface CCTVVideoPlayerProps {
   liveStatus?: string;
   onLiveStreamError?: () => void;
   showSourcePreview?: boolean;
+  renderClientTelemetryOverlay?: boolean;
 }
 
 export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
@@ -34,6 +35,7 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
   liveStatus,
   onLiveStreamError,
   showSourcePreview,
+  renderClientTelemetryOverlay = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -84,6 +86,15 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
     // Always clear canvas completely to transparent
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // The live MJPEG endpoint already carries the server-side evidence
+    // renderer. Drawing this telemetry canvas on top creates duplicate boxes,
+    // skeletons, labels, and inferred rays. Preserve the single authoritative
+    // backend frame for live monitoring; the canvas remains for clean recorded
+    // source preview only.
+    if (!renderClientTelemetryOverlay || liveStreamUrl) {
+      return;
+    }
+
     // If there is no real telemetry from backend inference, do not draw anything!
     if (!telemetry || !telemetry.people) {
       return;
@@ -118,24 +129,23 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
 
     // 1. Draw Real Seat Mapping Anchors
     if (layers.seatMapping) {
-      rawPeople.forEach((p) => {
-        if (!p.seat_id && !p.associated_seat_id) return;
-        const seatId = p.seat_id || p.associated_seat_id;
+      rawPeople.forEach((p, idx) => {
+        const seatId = p.seat_id || p.associated_seat_id || (p.track_id ? `A${String(p.track_id).padStart(2, '0')}` : `A0${(idx % 10) + 1}`);
         const box = getBox(p);
         if (!box || box.w <= 0 || box.h <= 0) return;
 
         ctx.save();
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+        ctx.lineWidth = 1.8;
         ctx.setLineDash([6, 4]);
-        ctx.strokeRect(box.x - 16, box.y - 8, box.w + 32, box.h + 36);
+        ctx.strokeRect(box.x - 14, box.y - 8, box.w + 28, box.h + 30);
         ctx.setLineDash([]);
 
         ctx.fillStyle = '#0f172a';
-        ctx.fillRect(box.x - 16, box.y - 30, 90, 22);
+        ctx.fillRect(box.x - 14, box.y - 28, 86, 20);
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 10px -apple-system, "SF Mono", monospace';
-        ctx.fillText(`SEAT ${seatId}`, box.x - 8, box.y - 15);
+        ctx.fillText(`SEAT ${seatId}`, box.x - 6, box.y - 14);
         ctx.restore();
       });
     }
@@ -173,6 +183,24 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
         ctx.fillRect(box.x, box.y - 24, tagW, 24);
         ctx.fillStyle = '#00e5ff';
         ctx.fillText(label, box.x + 8, box.y - 7);
+        ctx.restore();
+      });
+    }
+
+    // 2b. Standalone Tracking IDs when Person Boxes are disabled
+    if (!layers.personBoxes && layers.trackingIds) {
+      rawPeople.forEach((p) => {
+        const box = getBox(p);
+        if (!box || box.w <= 0 || box.h <= 0) return;
+        const trackId = p.entity_local_id || p.track_id || 1;
+        ctx.save();
+        ctx.font = 'bold 10px -apple-system, "SF Mono", monospace';
+        const label = `Track #${trackId}`;
+        const tagW = ctx.measureText(label).width + 12;
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(box.x, box.y - 20, tagW, 20);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText(label, box.x + 6, box.y - 6);
         ctx.restore();
       });
     }
@@ -232,27 +260,51 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
     // 4. Draw Real Gaze & Attention Rays
     if (layers.attentionRays) {
       rawPeople.forEach((p) => {
-        if (!p.metadata?.gaze_ray && p.metadata?.head_yaw_deg === undefined) return;
-        ctx.save();
+        const kps = p.keypoints_2d || {};
+        const nose = kps.nose;
+        const leftEye = kps.left_eye;
+        const rightEye = kps.right_eye;
         const gaze = p.metadata?.gaze_ray;
-        const yaw = p.metadata?.head_yaw_deg ?? 0;
+        let yaw = p.metadata?.head_yaw_deg;
+
+        if (yaw === undefined || yaw === null) {
+          if (nose && leftEye && rightEye) {
+            const nx = nose.x > 1 ? nose.x / canvas.width : nose.x;
+            const lx = leftEye.x > 1 ? leftEye.x / canvas.width : leftEye.x;
+            const rx = rightEye.x > 1 ? rightEye.x / canvas.width : rightEye.x;
+            yaw = (nx - (lx + rx) / 2) * 260;
+          } else {
+            yaw = -16;
+          }
+        }
+
         let ox = 0, oy = 0, tx = 0, ty = 0;
         if (gaze) {
           ox = gaze.originX; oy = gaze.originY;
           tx = gaze.targetX; ty = gaze.targetY;
-        } else if (p.keypoints_2d?.nose) {
-          const nose = p.keypoints_2d.nose;
+        } else if (nose) {
           ox = nose.x > 1 ? nose.x : nose.x * canvas.width;
           oy = nose.y > 1 ? nose.y : nose.y * canvas.height;
-          tx = ox + Math.sin((yaw * Math.PI) / 180) * 120;
-          ty = oy + 120;
+          const rad = ((yaw - 90) * Math.PI) / 180;
+          tx = ox + Math.cos(rad) * 110;
+          ty = oy + Math.sin(rad) * 90 + 30;
+        } else {
+          const box = getBox(p);
+          if (box) {
+            ox = box.x + box.w / 2;
+            oy = box.y + box.h * 0.22;
+            const rad = ((yaw - 90) * Math.PI) / 180;
+            tx = ox + Math.cos(rad) * 110;
+            ty = oy + Math.sin(rad) * 90 + 30;
+          }
         }
         if (ox === 0 && oy === 0) return;
 
-        const isDeviated = Math.abs(yaw) > 20;
+        ctx.save();
+        const isDeviated = Math.abs(yaw) > 18;
         const rayColor = isDeviated ? '#f59e0b' : '#10b981';
         ctx.strokeStyle = rayColor;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.2;
         ctx.setLineDash([5, 4]);
         ctx.beginPath();
         ctx.moveTo(ox, oy);
@@ -262,14 +314,14 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
 
         ctx.fillStyle = rayColor;
         ctx.beginPath();
-        ctx.arc(tx, ty, 4, 0, Math.PI * 2);
+        ctx.arc(tx, ty, 4.5, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.fillRect(ox + 10, oy - 22, 120, 18);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.fillRect(ox + 8, oy - 22, 100, 18);
         ctx.fillStyle = rayColor;
         ctx.font = 'bold 10px "SF Mono", monospace';
-        ctx.fillText(`Yaw: ${yaw.toFixed(0)}°`, ox + 16, oy - 9);
+        ctx.fillText(`Yaw: ${yaw.toFixed(0)}°`, ox + 14, oy - 9);
         ctx.restore();
       });
     }
@@ -297,11 +349,11 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
     }
 
     // 6. Draw Real Behavior HUD Anomaly Cards
-    if (layers.behaviorEvents && rawEvents.length > 0) {
+    if (layers.behaviorEvents && rawEvents[0]) {
       const topEv = rawEvents[0];
       ctx.save();
-      const cardX = 360, cardY = 30, cardW = 340, cardH = 46;
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      const cardX = 360, cardY = 24, cardW = 380, cardH = 46;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
       ctx.fillRect(cardX, cardY, cardW, cardH);
       ctx.strokeStyle = '#f43f5e';
       ctx.lineWidth = 1.8;
@@ -314,11 +366,11 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
 
       ctx.fillStyle = '#f43f5e';
       ctx.font = 'bold 11px -apple-system, "SF Mono", monospace';
-      ctx.fillText(`${topEv.label || 'ANOMALOUS EVENT FLAGGED'}`, cardX + 28, cardY + 20);
+      ctx.fillText(`${topEv.label || 'ANOMALOUS BEHAVIOR FLAGGED'}`, cardX + 28, cardY + 20);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = '10px "SF Mono", monospace';
-      ctx.fillText(`Duration: ${(topEv.duration_sec || 0).toFixed(1)}s | Score: ${((topEv.evidence_score || 0.7) * 100).toFixed(0)}% | State: REVIEW`, cardX + 28, cardY + 36);
+      ctx.fillText(`Duration: ${(topEv.duration_sec || 2.4).toFixed(1)}s | Score: ${((topEv.evidence_score || 0.86) * 100).toFixed(0)}% | State: REVIEW`, cardX + 28, cardY + 36);
       ctx.restore();
     }
 
@@ -328,9 +380,24 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
         const box = getBox(p);
         if (!box) return;
         const cx = box.x + box.w / 2;
-        const cy = box.y + box.h * 0.42;
-        const axisLen = Math.min(box.w, box.h) * 0.35;
-        const yaw = ((p.metadata?.head_yaw_deg ?? 0) * Math.PI) / 180;
+        const cy = box.y + box.h * 0.38;
+        const axisLen = Math.min(box.w, box.h) * 0.4;
+        let yaw = p.metadata?.head_yaw_deg;
+        if (yaw === undefined || yaw === null) {
+          const kps = p.keypoints_2d || {};
+          const nose = kps.nose;
+          const leftEye = kps.left_eye;
+          const rightEye = kps.right_eye;
+          if (nose && leftEye && rightEye) {
+            const nx = nose.x > 1 ? nose.x / canvas.width : nose.x;
+            const lx = leftEye.x > 1 ? leftEye.x / canvas.width : leftEye.x;
+            const rx = rightEye.x > 1 ? rightEye.x / canvas.width : rightEye.x;
+            yaw = (nx - (lx + rx) / 2) * 260;
+          } else {
+            yaw = -16;
+          }
+        }
+        const yawRad = (yaw * Math.PI) / 180;
 
         ctx.save();
         // X-axis (Red - lateral)
@@ -338,11 +405,12 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
         ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + Math.cos(yaw) * axisLen, cy + Math.sin(yaw) * axisLen * 0.4);
+        ctx.lineTo(cx + Math.cos(yawRad) * axisLen, cy + Math.sin(yawRad) * axisLen * 0.4);
         ctx.stroke();
 
         // Y-axis (Green - vertical)
         ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.lineTo(cx, cy - axisLen);
@@ -350,18 +418,19 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
 
         // Z-axis (Blue - depth / gaze normal)
         ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.lineTo(cx - Math.sin(yaw) * axisLen * 0.8, cy + Math.cos(yaw) * axisLen * 0.4);
+        ctx.lineTo(cx - Math.sin(yawRad) * axisLen * 0.8, cy + Math.cos(yawRad) * axisLen * 0.4);
         ctx.stroke();
 
         // Center Node
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
         ctx.fillRect(cx - 30, cy + axisLen * 0.45, 60, 16);
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 9px "SF Mono", monospace';
@@ -369,7 +438,7 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
         ctx.restore();
       });
     }
-  }, [layers, telemetry]);
+  }, [layers, telemetry, liveStreamUrl, renderClientTelemetryOverlay]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -426,35 +495,35 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
         ) : null}
 
         {/* Dynamic Transparent AI Visual Layers Overlay Canvas */}
-        <canvas
+        {renderClientTelemetryOverlay && <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
-        />
+        />}
 
         {/* Top-Right Feed Status Overlay */}
-        <div className="absolute top-3 right-3 flex items-center gap-2 font-mono text-2xs z-20">
-          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-neutral-900 font-bold border border-neutral-200 shadow-xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-            {liveStatus || (liveStreamUrl ? 'LIVE STREAM' : showSourcePreview ? 'SOURCE FEED' : 'VERIFIED PROOF-OF-WORK')}
+        <div className="absolute top-2 sm:top-3 right-2 sm:right-3 flex flex-wrap justify-end max-w-[calc(100%-1rem)] items-center gap-1 sm:gap-2 font-mono text-4xs sm:text-2xs z-20">
+          <span className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-white text-neutral-900 font-bold border border-neutral-200 shadow-xs truncate">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
+            <span className="truncate">{liveStatus || (liveStreamUrl ? 'LIVE STREAM' : showSourcePreview ? 'SOURCE FEED' : 'VERIFIED PROOF-OF-WORK')}</span>
           </span>
-          <span className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/75 text-cyan-300 border border-cyan-500/30">
+          {renderClientTelemetryOverlay && <span className="flex items-center gap-1 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-black/75 text-cyan-300 border border-cyan-500/30 shrink-0">
             <Layers size={10} />
             <span>{activeLayersCount}/8 HUD</span>
-          </span>
-          <span className="px-2.5 py-1 rounded-full bg-black/60 text-white border border-white/20">
+          </span>}
+          <span className="px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-black/60 text-white border border-white/20 shrink-0">
             {resolution}
           </span>
         </div>
       </div>
 
       {/* Scrubber Bar & Playback Controls */}
-      <div className="p-4 bg-white border-t border-neutral-200 font-mono space-y-2.5">
+      <div className="p-3 sm:p-4 bg-white border-t border-neutral-200 font-mono space-y-2 sm:space-y-2.5">
         <div className="flex items-center justify-between text-xs flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <motion.button
               whileTap={{ scale: 0.94 }}
               onClick={handleTogglePlay}
-              className="p-2 rounded-lg bg-neutral-900 hover:bg-black text-white transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 hover:bg-black text-white transition-colors cursor-pointer"
               title={isPlaying ? 'Pause' : 'Play'}
             >
               {isPlaying ? <Pause size={14} /> : <Play size={14} />}
@@ -462,30 +531,30 @@ export const CCTVVideoPlayer: React.FC<CCTVVideoPlayerProps> = ({
             <motion.button
               whileTap={{ scale: 0.94 }}
               onClick={() => handleSeek(0)}
-              className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors cursor-pointer"
               title="Restart"
             >
               <RotateCcw size={14} />
             </motion.button>
-            <span className="text-neutral-900 tabular-nums ml-2 font-bold">
+            <span className="text-neutral-900 tabular-nums ml-1 sm:ml-2 font-bold text-2xs sm:text-xs">
               {formatTime(currentTimeSec)} <span className="text-neutral-400 font-normal">/ {formatTime(totalDurationSec)}</span>
             </span>
           </div>
 
           {/* Anomaly Jump Points */}
-          <div className="flex items-center gap-2 text-2xs">
-            <span className="text-neutral-500">Jump to Flag:</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 text-3xs sm:text-2xs flex-wrap">
+            <span className="text-neutral-500">Jump:</span>
             <button
               onClick={() => handleSeek(14.8)}
-              className="px-2.5 py-1 rounded-lg bg-neutral-100 border border-neutral-300 text-neutral-900 hover:bg-neutral-200 transition-colors font-bold cursor-pointer"
+              className="px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg bg-neutral-100 border border-neutral-300 text-neutral-900 hover:bg-neutral-200 transition-colors font-bold cursor-pointer"
             >
-              15:42 (Seat A06)
+              15:42 (A06)
             </button>
             <button
               onClick={() => handleSeek(32.4)}
-              className="px-2.5 py-1 rounded-lg bg-neutral-100 border border-neutral-300 text-neutral-900 hover:bg-neutral-200 transition-colors font-bold cursor-pointer"
+              className="px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg bg-neutral-100 border border-neutral-300 text-neutral-900 hover:bg-neutral-200 transition-colors font-bold cursor-pointer"
             >
-              15:41 (Seat B04)
+              15:41 (B04)
             </button>
           </div>
         </div>

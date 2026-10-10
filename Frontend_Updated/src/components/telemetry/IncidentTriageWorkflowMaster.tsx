@@ -50,10 +50,10 @@ export const IncidentTriageWorkflowMaster: React.FC<IncidentTriageWorkflowMaster
           </div>
 
           <div className="text-right">
-            <div className="text-3xs font-mono font-bold uppercase tracking-widest text-neutral-400">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
               TOTAL TRIAGE RESOLUTION TIME
             </div>
-            <div className="font-heading font-extrabold text-3xl sm:text-4xl text-neutral-950 font-mono tracking-tight mt-0.5">
+            <div className="font-bold text-3xl sm:text-4xl text-neutral-950 font-mono tracking-tight tabular-nums mt-0.5">
               24s <span className="text-xs font-normal text-neutral-400 font-sans">/ Target: 30s</span>
             </div>
           </div>
@@ -74,16 +74,16 @@ export const IncidentTriageWorkflowMaster: React.FC<IncidentTriageWorkflowMaster
             }`}
           >
             <div className="space-y-1">
-              <div className={`text-3xs font-mono font-bold uppercase tracking-wider ${
+              <div className={`text-2xs font-semibold uppercase tracking-wider font-sans ${
                 selectedScenario === 1 ? 'text-amber-400' : 'text-neutral-500'
               }`}>
                 SCENARIO 1 / UNAUTHORIZED DEVICE IN LAP
               </div>
-              <div className="font-heading font-bold text-sm sm:text-base leading-snug">
+              <div className="font-bold text-sm sm:text-base leading-snug font-sans">
                 Candidate #6 (Seat A06) — Phone screen illumination & downward lap vector.
               </div>
             </div>
-            <div className={`text-xs font-mono pt-2 border-t ${
+            <div className={`text-xs font-sans pt-2 border-t ${
               selectedScenario === 1 ? 'border-white/10 text-neutral-400' : 'border-neutral-200 text-neutral-500'
             }`}>
               Confidence: 0.84 Peak • CAM-01 & CAM-02 Cross-Fused
@@ -103,16 +103,16 @@ export const IncidentTriageWorkflowMaster: React.FC<IncidentTriageWorkflowMaster
             }`}
           >
             <div className="space-y-1">
-              <div className={`text-3xs font-mono font-bold uppercase tracking-wider ${
+              <div className={`text-2xs font-semibold uppercase tracking-wider font-sans ${
                 selectedScenario === 2 ? 'text-emerald-400' : 'text-neutral-500'
               }`}>
                 SCENARIO 2 / COUNTER-EVIDENCE & BENIGN VARIATION
               </div>
-              <div className="font-heading font-bold text-sm sm:text-base leading-snug">
+              <div className="font-bold text-sm sm:text-base leading-snug font-sans">
                 Candidate #3 (Seat A03) — Wall countdown timer glance during section transition.
               </div>
             </div>
-            <div className={`text-xs font-mono pt-2 border-t ${
+            <div className={`text-xs font-sans pt-2 border-t ${
               selectedScenario === 2 ? 'border-white/10 text-neutral-400' : 'border-neutral-200 text-neutral-500'
             }`}>
               Confidence: 0.22 (Suppressed by Room Geometry Mask)
@@ -134,31 +134,31 @@ export const IncidentTriageWorkflowMaster: React.FC<IncidentTriageWorkflowMaster
 
         {/* 4. Three Inset Data Blocks (Level 2 Insets) */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-          <div className="md:col-span-4 p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
-            <div className="text-3xs font-mono font-bold uppercase text-neutral-500">
+          <div className="md:col-span-4 p-4 sm:p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
               Observation Timestamp
             </div>
-            <div className="font-mono font-extrabold text-base text-neutral-950">
+            <div className="font-mono font-bold text-sm sm:text-base text-neutral-950 tabular-nums">
               {selectedScenario === 1 ? '15:33:42 IST / CBT-A01' : '15:28:10 IST / CBT-A01'}
             </div>
           </div>
 
-          <div className="md:col-span-5 p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
-            <div className="text-3xs font-mono font-bold uppercase text-neutral-500">
+          <div className="md:col-span-5 p-4 sm:p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
               Telemetry Model Selected
             </div>
-            <div className="font-mono font-bold text-base text-neutral-950 truncate">
+            <div className="font-sans font-semibold text-xs sm:text-sm text-neutral-950 truncate">
               {selectedScenario === 1
                 ? 'Multi-HMR 3D Pose + Lap Bounding Box'
                 : 'Spatial Wall Angle Homography Suppression'}
             </div>
           </div>
 
-          <div className="md:col-span-3 p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
-            <div className="text-3xs font-mono font-bold uppercase text-neutral-500">
+          <div className="md:col-span-3 p-4 sm:p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
               Aggregated Risk
             </div>
-            <div className={`font-mono font-extrabold text-xl ${
+            <div className={`font-mono font-bold text-lg sm:text-xl tabular-nums ${
               selectedScenario === 1 ? 'text-rose-700' : 'text-emerald-700'
             }`}>
               {selectedScenario === 1 ? '84% (Critical)' : '14% (Nominal)'}

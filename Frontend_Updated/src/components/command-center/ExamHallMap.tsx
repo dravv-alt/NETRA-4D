@@ -44,9 +44,10 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
   const [viewMode, setViewMode] = useState<'floorplan' | 'compact-grid'>('floorplan');
   const [rotation, setRotation] = useState<0 | 90 | 180 | 270>(0);
   const [cameraMode, setCameraMode] = useState<'single' | 'quad'>('single');
-  // CCTV Camera is NOT placed by default; the user places it anywhere in the room
-  const [customCamPos, setCustomCamPos] = useState<{ x: number; y: number } | null>(null);
-  const [camAimAngle, setCamAimAngle] = useState<number | null>(null); // null = auto-aim toward room center
+  // CCTV Camera is mounted on the central walkway aisle track (Left <-> Right rail)
+  const [customCamPos, setCustomCamPos] = useState<{ x: number; y: number } | null>({ x: 18, y: 50 });
+  const [camAimAngle, setCamAimAngle] = useState<90 | 270>(90); // 90 = Right (East), 270 = Left (West)
+  const [coneRangePercent, setConeRangePercent] = useState<number>(78); // Visual Cone Reach (e.g. 78% of lab hall deck, ~15M)
   const [isPlacingCam, setIsPlacingCam] = useState<boolean>(false);
   const [isDraggingCam, setIsDraggingCam] = useState<boolean>(false);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -63,7 +64,7 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
     return getRotatedPoint(customCamPos.x, customCamPos.y, rotation);
   }, [customCamPos, rotation]);
 
-  // Universal Camera Drag Handler: works whether starting from placed badge or toolbar token
+  // Universal Camera Drag Handler: Constrained strictly along the central aisle rail (Left <-> Right)
   const startCameraDrag = () => {
     setIsDraggingCam(true);
     setIsPlacingCam(false);
@@ -71,13 +72,20 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const rawX = ((moveEvent.clientX - rect.left) / rect.width) * 100;
-      const rawY = ((moveEvent.clientY - rect.top) / rect.height) * 100;
-      const clampedX = Math.max(3, Math.min(97, rawX));
-      const clampedY = Math.max(3, Math.min(97, rawY));
 
-      const canonical = unrotatePoint(clampedX, clampedY, rotation);
-      setCustomCamPos(canonical);
+      if (!isPortrait) {
+        // Landscape (0° / 180°): Drag horizontally along central aisle (y = 50% fixed)
+        const rawX = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+        const clampedX = Math.max(6, Math.min(94, Math.round(rawX * 10) / 10));
+        const canonical = unrotatePoint(clampedX, 50, rotation);
+        setCustomCamPos(canonical);
+      } else {
+        // Portrait (90° / 270°): Aisle runs vertically (x = 50% fixed), drag along track
+        const rawY = ((moveEvent.clientY - rect.top) / rect.height) * 100;
+        const clampedY = Math.max(6, Math.min(94, Math.round(rawY * 10) / 10));
+        const canonical = unrotatePoint(50, clampedY, rotation);
+        setCustomCamPos(canonical);
+      }
     };
 
     const handlePointerUp = () => {
@@ -97,32 +105,40 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
     startCameraDrag();
   };
 
-  // Track mouse position over canvas for placement preview
+  // Track mouse position over canvas for placement preview (locked to central aisle)
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isPlacingCam || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const rawX = ((e.clientX - rect.left) / rect.width) * 100;
-    const rawY = ((e.clientY - rect.top) / rect.height) * 100;
-    const clampedX = Math.max(3, Math.min(97, rawX));
-    const clampedY = Math.max(3, Math.min(97, rawY));
-    setMousePos({ x: clampedX, y: clampedY });
+    if (!isPortrait) {
+      const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+      const clampedX = Math.max(6, Math.min(94, Math.round(rawX * 10) / 10));
+      setMousePos({ x: clampedX, y: 50 });
+    } else {
+      const rawY = ((e.clientY - rect.top) / rect.height) * 100;
+      const clampedY = Math.max(6, Math.min(94, Math.round(rawY * 10) / 10));
+      setMousePos({ x: 50, y: clampedY });
+    }
   };
 
   const handleCanvasMouseLeave = () => {
     setMousePos(null);
   };
 
-  // Handle clicking on room canvas to place camera anywhere in the room
+  // Handle clicking on room canvas to place camera along the central aisle rail
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isPlacingCam || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const rawX = ((e.clientX - rect.left) / rect.width) * 100;
-    const rawY = ((e.clientY - rect.top) / rect.height) * 100;
-    const clampedX = Math.max(3, Math.min(97, rawX));
-    const clampedY = Math.max(3, Math.min(97, rawY));
-
-    const canonical = unrotatePoint(clampedX, clampedY, rotation);
-    setCustomCamPos(canonical);
+    if (!isPortrait) {
+      const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+      const clampedX = Math.max(6, Math.min(94, Math.round(rawX * 10) / 10));
+      const canonical = unrotatePoint(clampedX, 50, rotation);
+      setCustomCamPos(canonical);
+    } else {
+      const rawY = ((e.clientY - rect.top) / rect.height) * 100;
+      const clampedY = Math.max(6, Math.min(94, Math.round(rawY * 10) / 10));
+      const canonical = unrotatePoint(50, clampedY, rotation);
+      setCustomCamPos(canonical);
+    }
     setIsPlacingCam(false);
     setMousePos(null);
     playHapticSound('snap');
@@ -267,16 +283,30 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
     }
   };
 
-  const getSeatStyle = (state: SeatNodeData['state'], isSelected: boolean, isDimmed: boolean) => {
+  const getSeatStyle = (
+    state: SeatNodeData['state'],
+    isSelected: boolean,
+    isDimmed: boolean,
+    isBlindSpot = false,
+    isActivelyCovered = false
+  ) => {
     let base = 'transition-all duration-150 cursor-pointer flex flex-col justify-between select-none font-sans rounded-xl shadow-2xs ';
 
     if (isDimmed) {
       base += 'opacity-25 scale-95 ';
+    } else if (isBlindSpot) {
+      base += 'opacity-65 border-dashed border-neutral-300 bg-neutral-50/70 ';
+    } else if (isActivelyCovered && !isSelected) {
+      base += 'ring-1 ring-sky-400/60 shadow-xs shadow-sky-500/10 ';
     }
 
     if (isSelected) {
       base += 'bg-[#181716] text-[#FAF7F3] ring-2 ring-neutral-900 shadow-md border-neutral-900 scale-[1.05] z-30 ';
       return base;
+    }
+
+    if (isBlindSpot && state === 'normal') {
+      return base + 'text-neutral-500 hover:border-neutral-400 z-10';
     }
 
     switch (state) {
@@ -292,6 +322,155 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
     }
   };
 
+  // Real-World Geometric Optics: Test if a workstation seat lies within camera's field of view
+  const getSeatCoverage = (seat: SeatNodeData): { isCovered: boolean; cameraName: string } => {
+    if (cameraMode === 'quad') {
+      return {
+        isCovered: true,
+        cameraName: seat.cameraIds?.[0] || 'CAM-01',
+      };
+    }
+
+    if (!customCamPos) {
+      return { isCovered: false, cameraName: 'UNPLACED' };
+    }
+
+    const sx = seat.spatialPosition?.x ?? 50;
+    const sy = seat.spatialPosition?.y ?? 50;
+
+    // Optical Physics: Light travels along forward vectors from the lens aperture.
+    // The camera has zero visibility behind its casing (backward hemisphere is in the blind spot).
+    if (camAimAngle === 90) {
+      // Aiming East (Right): only seats ahead in +X are illuminated
+      if (sx < customCamPos.x - 2) {
+        return { isCovered: false, cameraName: 'BLIND' };
+      }
+      const dist = Math.hypot(sx - customCamPos.x, (sy - 50) * 1.5);
+      if (dist > coneRangePercent) {
+        return { isCovered: false, cameraName: 'OUT_OF_RANGE' };
+      }
+      return { isCovered: true, cameraName: 'CAM-01' };
+    } else {
+      // Aiming West (Left): only seats ahead in -X are illuminated
+      if (sx > customCamPos.x + 2) {
+        return { isCovered: false, cameraName: 'BLIND' };
+      }
+      const dist = Math.hypot(customCamPos.x - sx, (sy - 50) * 1.5);
+      if (dist > coneRangePercent) {
+        return { isCovered: false, cameraName: 'OUT_OF_RANGE' };
+      }
+      return { isCovered: true, cameraName: 'CAM-01' };
+    }
+  };
+
+  // Helper to format contiguous numbers (e.g. [2..10, 12..20] -> "#2–#10, #12–#20")
+  const formatNumberRanges = (nums: number[]): string => {
+    if (nums.length === 0) return 'None';
+    const sorted = [...new Set(nums)].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === prev + 1) {
+        prev = sorted[i];
+      } else {
+        ranges.push(start === prev ? `#${start}` : `#${start}–#${prev}`);
+        start = sorted[i];
+        prev = sorted[i];
+      }
+    }
+    ranges.push(start === prev ? `#${start}` : `#${start}–#${prev}`);
+    return ranges.join(', ');
+  };
+
+  // Helper to format contiguous workstation IDs (e.g. cols 2..10 of Row A -> "A02–A10")
+  const formatSeatRanges = (rowSeats: SeatNodeData[]): string => {
+    if (rowSeats.length === 0) return 'None';
+    const prefix = rowSeats[0].gridPosition.row;
+    const cols = [...new Set(rowSeats.map((s) => s.gridPosition.col))].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let start = cols[0];
+    let prev = cols[0];
+
+    for (let i = 1; i < cols.length; i++) {
+      if (cols[i] === prev + 1) {
+        prev = cols[i];
+      } else {
+        ranges.push(
+          start === prev
+            ? `${prefix}${String(start).padStart(2, '0')}`
+            : `${prefix}${String(start).padStart(2, '0')}–${prefix}${String(prev).padStart(2, '0')}`
+        );
+        start = cols[i];
+        prev = cols[i];
+      }
+    }
+    ranges.push(
+      start === prev
+        ? `${prefix}${String(start).padStart(2, '0')}`
+        : `${prefix}${String(start).padStart(2, '0')}–${prefix}${String(prev).padStart(2, '0')}`
+    );
+    return ranges.join(', ');
+  };
+
+  // Live Optical Surveillance Coverage Analysis
+  const coverageData = useMemo(() => {
+    const total = resolvedSeats.length;
+    if (cameraMode === 'quad') {
+      const rowAAll = resolvedSeats.filter((s) => s.gridPosition.row === 'A');
+      const rowBAll = resolvedSeats.filter((s) => s.gridPosition.row === 'B');
+      const candidateNums = resolvedSeats
+        .map((s) => parseInt(s.candidateId || '0', 10))
+        .filter((n) => n > 0);
+
+      return {
+        coveredCount: total,
+        totalCount: total,
+        percent: 100,
+        candidateRange: formatNumberRanges(candidateNums),
+        rowARange: formatSeatRanges(rowAAll),
+        rowBRange: formatSeatRanges(rowBAll),
+        blindIds: [] as string[],
+      };
+    }
+
+    if (!customCamPos) {
+      return {
+        coveredCount: 0,
+        totalCount: total,
+        percent: 0,
+        candidateRange: 'None (Unplaced)',
+        rowARange: 'None',
+        rowBRange: 'None',
+        blindIds: resolvedSeats.map((s) => s.id),
+      };
+    }
+
+    const covered = resolvedSeats.filter((s) => getSeatCoverage(s).isCovered);
+    const blind = resolvedSeats.filter((s) => !getSeatCoverage(s).isCovered);
+    const percent = total > 0 ? Math.round((covered.length / total) * 100) : 0;
+
+    const rowACovered = covered.filter((s) => s.gridPosition.row === 'A');
+    const rowBCovered = covered.filter((s) => s.gridPosition.row === 'B');
+
+    const candidateNums = covered
+      .map((s) => parseInt(s.candidateId || '0', 10))
+      .filter((n) => n > 0);
+
+    return {
+      coveredCount: covered.length,
+      totalCount: total,
+      percent,
+      candidateRange: formatNumberRanges(candidateNums),
+      rowARange: formatSeatRanges(rowACovered),
+      rowBRange: formatSeatRanges(rowBCovered),
+      blindIds: blind.map((s) => s.id),
+    };
+  }, [cameraMode, customCamPos, camAimAngle, coneRangePercent, resolvedSeats]);
+
+  const coveredSeatsCount = coverageData.coveredCount;
+
   // Camera Coverage Definitions for Quad-Camera mode (Room coordinate points in 0-1000 scale)
   const CAMERA_COORDINATES = {
     'CAM-02': { x: 30, y: 30, name: 'North-West CCTV', cone: '30,30 450,30 30,450' },
@@ -303,11 +482,14 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
   // Render Compact Workstation Card
   const renderWorkstationCard = (seat: SeatNodeData, isCompactGrid = false) => {
     const isSelected = selectedSeatId === seat.id;
-    const assignedCam = cameraMode === 'single' ? 'CAM-01' : (seat.cameraIds?.[0] || 'CAM-01');
+    const coverage = getSeatCoverage(seat);
+    const assignedCam = coverage.cameraName;
+    const isBlindSpot = cameraMode === 'single' && Boolean(customCamPos) && !coverage.isCovered;
+    const isActivelyCovered = cameraMode === 'single' && Boolean(customCamPos) && coverage.isCovered;
     const isDimmed = Boolean(
       activeCameraFilter &&
       (cameraMode === 'single'
-        ? activeCameraFilter !== 'CAM-01'
+        ? activeCameraFilter === 'CAM-01' && !coverage.isCovered
         : !seat.cameraIds?.includes(activeCameraFilter))
     );
     const rawFacing = (seat.spatialPosition?.facing || (seat.gridPosition.row === 'A' ? 'North' : 'South')) as 'North' | 'South' | 'East' | 'West';
@@ -369,9 +551,16 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
                   aspectRatio: dynamicLayout.aspectRatio,
                 }
           }
+          title={`${seat.id} • Candidate #${seat.candidateId} (${seat.candidateName})${
+            isBlindSpot
+              ? ' • ⚠️ Blind Spot (Behind CAM-01 lens aperture)'
+              : isActivelyCovered
+              ? ' • 👁️ Inside CAM-01 Optical Vision Cone'
+              : ''
+          }`}
           className={`${dynamicLayout.padding} ${
             isCompactGrid ? 'min-h-[76px] w-full' : ''
-          } ${getSeatStyle(seat.state, isSelected, isDimmed)}`}
+          } ${getSeatStyle(seat.state, isSelected, isDimmed, isBlindSpot, isActivelyCovered)}`}
         >
           {/* Top Bar: Laptop Icon & Facing Vector */}
           <div className="flex items-center justify-between text-[8px] pb-0.5 border-b border-black/[0.05] font-mono leading-none">
@@ -397,11 +586,10 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
             </div>
           </div>
 
-          {/* Bottom Bar: Camera Tag & Alerts */}
+          {/* Bottom Bar: Zone & Alerts (No camera tags) */}
           <div className="pt-0.5 border-t border-black/[0.05] flex items-center justify-between text-[8px] font-mono leading-none opacity-80">
-            <span className="flex items-center gap-0.5 truncate text-[7px]" title={`Monitored by ${assignedCam}`}>
-              <Camera size={dynamicLayout.iconSize - 1} />
-              <span>{assignedCam.replace('CAM-', 'C')}</span>
+            <span className="text-[7px] text-neutral-500 font-bold tracking-tight">
+              {seat.gridPosition.row === 'A' ? 'ROW A' : 'ROW B'}
             </span>
             {seat.telemetry?.objectEvidence ? (
               <span className="font-bold px-1 py-0.2 rounded bg-rose-500 text-white text-[7px] animate-pulse">
@@ -430,14 +618,25 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
               <span className="text-3xs font-mono font-bold px-2 py-0.5 rounded-full bg-white border border-neutral-200 text-neutral-800">
                 {seats.length} Workstations
               </span>
-              <span className="text-3xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${customCamPos ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-400'}`} />
-                {cameraMode === 'single'
-                  ? customCamPos
-                    ? `CCTV @ (${customCamPos.x}%, ${customCamPos.y}%)`
-                    : 'CCTV: Unplaced (User Placed)'
-                  : '4 Distributed Feeds'}
+              <span className="text-3xs font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-900 border border-emerald-300 flex items-center gap-1.5 shadow-2xs">
+                <span className={`w-2 h-2 rounded-full ${customCamPos ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-400'}`} />
+                {cameraMode === 'single' ? (
+                  customCamPos ? (
+                    <span>
+                      <strong>CCTV Live:</strong> Students <span className="text-emerald-700 underline font-extrabold">{coverageData.candidateRange}</span> ({coverageData.coveredCount}/{seats.length} Covered • {coverageData.percent}% FOV)
+                    </span>
+                  ) : (
+                    <span>CCTV: Unplaced (0/20 Covered)</span>
+                  )
+                ) : (
+                  <span>4 Distributed Feeds (100% Coverage • Students #1–#20)</span>
+                )}
               </span>
+              {cameraMode === 'single' && customCamPos && coverageData.blindIds.length > 0 && (
+                <span className="text-3xs font-mono font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                  <span>Blind ({coverageData.blindIds.length}): {coverageData.blindIds.join(', ')}</span>
+                </span>
+              )}
             </div>
             <p className="text-3xs text-neutral-500 mt-0.5">
               Architectural Room Floorplan • Spatial Telemetry & Camera Coverage
@@ -550,37 +749,34 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
                 </div>
               )}
 
-              {/* Camera Aim Angle Cycler (When camera is placed) */}
+              {/* Camera Aim Orientation Toggle (Left vs Right down the aisle) */}
               {customCamPos && (
                 <button
                   onClick={() => {
                     playHapticSound('click');
-                    setCamAimAngle((prev) => {
-                      if (prev === null) return 0;
-                      if (prev === 270) return null;
-                      return prev + 90;
-                    });
+                    setCamAimAngle((prev) => (prev === 90 ? 270 : 90));
                   }}
-                  title={`Aim: ${camAimAngle !== null ? camAimAngle + '°' : 'Auto (Center)'}. Click to rotate aim.`}
-                  className="px-1.5 py-1 text-[7.5px] rounded text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 border-l border-neutral-200 font-bold"
+                  title={`Aim: ${camAimAngle === 270 ? 'Left (West)' : 'Right (East)'}. Click to switch direction.`}
+                  className="px-2 py-1 text-[7.5px] rounded bg-sky-50 text-sky-800 hover:bg-sky-100 border-l border-neutral-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  Aim: {camAimAngle !== null ? `${camAimAngle}°` : 'Auto'}
+                  <span>{camAimAngle === 270 ? '◀ Aim Left' : '▶ Aim Right'}</span>
                 </button>
               )}
 
-              {/* Quick Snaps */}
+              {/* Quick Aisle Rail Snaps */}
               <div className="flex items-center pl-1 border-l border-neutral-200">
-                <span className="text-[7px] text-neutral-400 font-bold uppercase mr-1">Snap:</span>
+                <span className="text-[7px] text-neutral-400 font-bold uppercase mr-1">Aisle:</span>
                 <button
                   onClick={() => {
                     playHapticSound('snap');
-                    setCustomCamPos({ x: 5, y: 50 });
+                    setCustomCamPos({ x: 10, y: 50 });
+                    setCamAimAngle(90);
                     setIsPlacingCam(false);
                   }}
-                  title="Snap camera to Aisle Head (West)"
-                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+                  title="Snap camera to Aisle Left (West, pointing Right)"
+                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 font-medium cursor-pointer"
                 >
-                  Head
+                  Left
                 </button>
                 <button
                   onClick={() => {
@@ -588,23 +784,73 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
                     setCustomCamPos({ x: 50, y: 50 });
                     setIsPlacingCam(false);
                   }}
-                  title="Snap camera to Room Center (Ceiling)"
-                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+                  title="Snap camera to Aisle Center"
+                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 font-medium cursor-pointer"
                 >
                   Center
                 </button>
                 <button
                   onClick={() => {
                     playHapticSound('snap');
-                    setCustomCamPos({ x: 95, y: 50 });
+                    setCustomCamPos({ x: 90, y: 50 });
+                    setCamAimAngle(270);
                     setIsPlacingCam(false);
                   }}
-                  title="Snap camera to Aisle End (East)"
-                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+                  title="Snap camera to Aisle Right (East, pointing Left)"
+                  className="px-1.5 py-0.5 text-[7.5px] rounded text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 font-medium cursor-pointer"
                 >
-                  End
+                  Right
                 </button>
               </div>
+
+              {/* Visual Cone Optical Range Selector */}
+              {customCamPos && (
+                <div className="flex items-center pl-1 border-l border-neutral-200">
+                  <span className="text-[7px] text-neutral-400 font-bold uppercase mr-1">Range:</span>
+                  <button
+                    onClick={() => {
+                      playHapticSound('click');
+                      setConeRangePercent(45);
+                    }}
+                    title="Short Optical Range (45% of hall, ~10M)"
+                    className={`px-1.5 py-0.5 text-[7.5px] rounded font-bold cursor-pointer transition-colors ${
+                      coneRangePercent === 45
+                        ? 'bg-sky-600 text-white shadow-2xs'
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+                    }`}
+                  >
+                    10M
+                  </button>
+                  <button
+                    onClick={() => {
+                      playHapticSound('click');
+                      setConeRangePercent(78);
+                    }}
+                    title="Standard Optical Range (78% of hall, ~15M)"
+                    className={`px-1.5 py-0.5 text-[7.5px] rounded font-bold cursor-pointer transition-colors ${
+                      coneRangePercent === 78
+                        ? 'bg-sky-600 text-white shadow-2xs'
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+                    }`}
+                  >
+                    15M
+                  </button>
+                  <button
+                    onClick={() => {
+                      playHapticSound('click');
+                      setConeRangePercent(95);
+                    }}
+                    title="Max Deck Range (95% full hall reach)"
+                    className={`px-1.5 py-0.5 text-[7.5px] rounded font-bold cursor-pointer transition-colors ${
+                      coneRangePercent === 95
+                        ? 'bg-sky-600 text-white shadow-2xs'
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+                    }`}
+                  >
+                    Max
+                  </button>
+                </div>
+              )}
 
               {/* Remove Button */}
               {customCamPos && (
@@ -757,6 +1003,55 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
             }}
           />
 
+          {/* Tactical Student Coverage HUD: Instant On-Map Range Display */}
+          {cameraMode === 'single' && (
+            <div className="absolute top-2.5 left-2.5 z-20 pointer-events-auto bg-neutral-950/90 backdrop-blur-md text-white border border-neutral-700/80 rounded-xl p-2.5 shadow-xl font-mono text-[8.5px] max-w-[270px] sm:max-w-[320px] transition-all">
+              <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-white/10 text-[7.5px] text-neutral-400 uppercase tracking-wider font-bold">
+                <span className="flex items-center gap-1.5 text-sky-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  CCTV Live Coverage
+                </span>
+                <span className="text-neutral-400 font-normal">
+                  Aim: {camAimAngle === 90 ? 'East ▶' : 'West ◀'} ({customCamPos ? `${customCamPos.x}%` : 'Off'})
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-1.5 mb-1">
+                <span className="text-neutral-400 text-[8px] font-medium">Students Covered:</span>
+                <span className="font-heading font-black text-xs text-emerald-400 tracking-tight">
+                  {coverageData.candidateRange}
+                </span>
+              </div>
+              <div className="space-y-0.5 text-[8px] text-neutral-300">
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-400">Row A Desks:</span>
+                  <span className="font-bold text-sky-300">{coverageData.rowARange}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-400">Row B Desks:</span>
+                  <span className="font-bold text-sky-300">{coverageData.rowBRange}</span>
+                </div>
+              </div>
+              <div className="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between text-[7.5px]">
+                <span className="text-neutral-400">Visual Cone Range:</span>
+                <span className="font-bold text-sky-400">
+                  {coneRangePercent}% Hall Reach ({Math.round(coneRangePercent * 0.2)}M)
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[7.5px]">
+                <span className="text-neutral-400">FOV Monitored:</span>
+                <span className="font-bold text-emerald-400">
+                  {coverageData.coveredCount} of {seats.length} ({coverageData.percent}%)
+                </span>
+              </div>
+              {coverageData.blindIds.length > 0 && (
+                <div className="mt-1 pt-1 border-t border-white/10 text-[7.5px] text-amber-300 flex items-center justify-between">
+                  <span className="text-amber-400 font-bold">Blind Spot ({coverageData.blindIds.length}):</span>
+                  <span className="font-mono text-amber-200">{coverageData.blindIds.join(', ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* SVG Overlay for Vision Cones & Adjacency Graph */}
           <svg
             className="absolute inset-0 w-full h-full pointer-events-none z-0"
@@ -786,144 +1081,23 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
               </clipPath>
             </defs>
 
-            {/* Vision Cones / Dynamic Coverage Field from User Placement */}
-            {showFovCones && (
-              cameraMode === 'single' ? (
-                visualCamPos ? (
-                  <g className="transition-opacity duration-200" clipPath="url(#room-bounds)">
-                    {(() => {
-                      const Xc = visualCamPos.x * 10;
-                      const Yc = visualCamPos.y * 10;
-                      const dx = 500 - Xc;
-                      const dy = 500 - Yc;
-                      const distFromCenter = Math.sqrt(dx * dx + dy * dy);
-
-                      // If user placed camera near room center & aim is Auto, render 360° omnidirectional radial coverage
-                      if (distFromCenter < 80 && camAimAngle === null) {
-                        return (
-                          <>
-                            <ellipse
-                              cx={Xc}
-                              cy={Yc}
-                              rx={isPortrait ? 420 : 480}
-                              ry={isPortrait ? 480 : 420}
-                              fill="url(#fov-cam-grad)"
-                              opacity={!activeCameraFilter || activeCameraFilter === 'CAM-01' ? 1 : 0.15}
-                            />
-                            <ellipse
-                              cx={Xc}
-                              cy={Yc}
-                              rx={isPortrait ? 420 : 480}
-                              ry={isPortrait ? 480 : 420}
-                              fill="none"
-                              stroke="#0284c7"
-                              strokeWidth="1.5"
-                              strokeDasharray="4 4"
-                              opacity={!activeCameraFilter || activeCameraFilter === 'CAM-01' ? 0.35 : 0.1}
-                            />
-                            <line x1={Math.max(40, Xc - 400)} y1={Yc} x2={Math.min(960, Xc + 400)} y2={Yc} stroke="#0284c7" strokeWidth="0.75" strokeDasharray="3 3" opacity={0.25} />
-                            <line x1={Xc} y1={Math.max(40, Yc - 400)} x2={Xc} y2={Math.min(960, Yc + 400)} stroke="#0284c7" strokeWidth="0.75" strokeDasharray="3 3" opacity={0.25} />
-                          </>
-                        );
-                      }
-
-                      // Directional frustum: respect user's custom aim angle OR auto-aim toward center of room
-                      let angleRad = Math.atan2(dy, dx);
-                      if (camAimAngle !== null) {
-                        const effectiveAimDeg = (camAimAngle + rotation) % 360;
-                        angleRad = (effectiveAimDeg * Math.PI) / 180;
-                      }
-
-                      const fovRad = 52 * (Math.PI / 180);
-                      const R = 1500;
-
-                      const x1 = Xc + R * Math.cos(angleRad - fovRad);
-                      const y1 = Yc + R * Math.sin(angleRad - fovRad);
-                      const xmid = Xc + R * Math.cos(angleRad);
-                      const ymid = Yc + R * Math.sin(angleRad);
-                      const x2 = Xc + R * Math.cos(angleRad + fovRad);
-                      const y2 = Yc + R * Math.sin(angleRad + fovRad);
-
-                      const conePoints = `${Xc},${Yc} ${x1},${y1} ${xmid},${ymid} ${x2},${y2}`;
-
-                      return (
-                        <>
-                          <polygon
-                            points={conePoints}
-                            fill="url(#fov-cam-grad)"
-                            opacity={!activeCameraFilter || activeCameraFilter === 'CAM-01' ? 1 : 0.15}
-                          />
-                          <polygon
-                            points={conePoints}
-                            fill="none"
-                            stroke="#0284c7"
-                            strokeWidth="1.5"
-                            strokeDasharray="4 4"
-                            opacity={!activeCameraFilter || activeCameraFilter === 'CAM-01' ? 0.4 : 0.1}
-                          />
-                          {/* Optical Boresight Center Axis */}
-                          <line
-                            x1={Xc}
-                            y1={Yc}
-                            x2={xmid}
-                            y2={ymid}
-                            stroke="#0284c7"
-                            strokeWidth="1.2"
-                            strokeDasharray="5 3"
-                            opacity={0.35}
-                          />
-                        </>
-                      );
-                    })()}
-                  </g>
-                ) : isPlacingCam && mousePos ? (
-                  /* Placement Ghost Frustum Preview */
-                  <g className="pointer-events-none opacity-50" clipPath="url(#room-bounds)">
-                    {(() => {
-                      const Xm = mousePos.x * 10;
-                      const Ym = mousePos.y * 10;
-                      const dx = 500 - Xm;
-                      const dy = 500 - Ym;
-                      const angleRad = Math.atan2(dy, dx);
-                      const fovRad = 50 * (Math.PI / 180);
-                      const R = 750;
-                      const x1 = Xm + R * Math.cos(angleRad - fovRad);
-                      const y1 = Ym + R * Math.sin(angleRad - fovRad);
-                      const x2 = Xm + R * Math.cos(angleRad + fovRad);
-                      const y2 = Ym + R * Math.sin(angleRad + fovRad);
-                      return (
-                        <>
-                          <polygon
-                            points={`${Xm},${Ym} ${x1},${y1} ${x2},${y2}`}
-                            fill="#0284c7"
-                            fillOpacity="0.15"
-                            stroke="#0284c7"
-                            strokeWidth="1.2"
-                            strokeDasharray="4 4"
-                          />
-                          <circle cx={Xm} cy={Ym} r="16" fill="#0284c7" fillOpacity="0.3" stroke="#0284c7" strokeWidth="1.5" />
-                        </>
-                      );
-                    })()}
-                  </g>
-                ) : null
-              ) : (
-                <g className="transition-opacity duration-200">
-                  {Object.entries(CAMERA_COORDINATES).map(([camId, cam]) => {
-                    const isActive = !activeCameraFilter || activeCameraFilter === camId;
-                    const rotatedCone = rotatePolyPoints(cam.cone, rotation);
-                    return (
-                      <polygon
-                        key={camId}
-                        points={rotatedCone}
-                        fill="url(#fov-wedge-grad)"
-                        opacity={isActive ? 1 : 0.15}
-                        className="transition-opacity duration-200"
-                      />
-                    );
-                  })}
-                </g>
-              )
+            {/* Vision Cones: 4-Corner Distributed CCTV Array when in quad mode */}
+            {showFovCones && cameraMode === 'quad' && (
+              <g className="transition-opacity duration-200">
+                {Object.entries(CAMERA_COORDINATES).map(([camId, cam]) => {
+                  const isActive = !activeCameraFilter || activeCameraFilter === camId;
+                  const rotatedCone = rotatePolyPoints(cam.cone, rotation);
+                  return (
+                    <polygon
+                      key={camId}
+                      points={rotatedCone}
+                      fill="url(#fov-wedge-grad)"
+                      opacity={isActive ? 1 : 0.15}
+                      className="transition-opacity duration-200"
+                    />
+                  );
+                })}
+              </g>
             )}
 
             {/* Adjacency Collusion Vectors */}
@@ -1026,16 +1200,8 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
           {/* ---------------- 3. CAMERA SETUP: USER-PLACEABLE CCTV OR 4 CORNERS ---------------- */}
           {cameraMode === 'single' ? (
             customCamPos && visualCamPos ? (
-              /* User-Placed CCTV Camera Component (Freely Draggable Anywhere) */
+              /* Precision CCTV Camera Component: Aisle Track Mounted with Left/Right Orientation */
               <div
-                onPointerDown={handlePointerDownCam}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isDraggingCam) {
-                    playHapticSound('click');
-                    setActiveCameraFilter(activeCameraFilter === 'CAM-01' ? null : 'CAM-01');
-                  }
-                }}
                 style={{
                   position: 'absolute',
                   left: `${visualCamPos.x}%`,
@@ -1043,54 +1209,219 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
                   transform: 'translate(-50%, -50%)',
                   touchAction: 'none',
                 }}
-                className={`z-25 h-7 px-2.5 rounded-full border flex items-center gap-1.5 cursor-grab active:cursor-grabbing shadow-lg font-mono text-[8px] transition-shadow select-none whitespace-nowrap ${
-                  isDraggingCam
-                    ? 'bg-sky-950 text-white ring-2 ring-sky-400 scale-105 shadow-2xl'
-                    : activeCameraFilter === 'CAM-01'
-                    ? 'bg-neutral-900 text-white border-neutral-900 ring-2 ring-sky-400'
-                    : 'bg-white/95 text-neutral-900 border-neutral-300 hover:border-neutral-500 hover:shadow-xl'
-                }`}
-                title="CAM-01: Drag to place anywhere in the room. Click to filter telemetry."
+                className="relative z-25 select-none w-8 h-8 flex items-center justify-center pointer-events-auto"
               >
-                <Move size={9} className="opacity-60 text-sky-500" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <Camera size={10} className="text-sky-600" />
-                <span className="font-black text-[8.5px]">CAM-01</span>
-                <span className="text-[7px] font-bold px-1 py-0.2 rounded bg-sky-100 text-sky-800">
-                  {customCamPos.x}%, {customCamPos.y}%
-                </span>
+                {/* 1. CO-LOCATED OPTICAL VISION CONE: Originates directly from (0, 0) of the camera lens, covering student territory */}
+                {showFovCones && (!activeCameraFilter || activeCameraFilter === 'CAM-01') && (() => {
+                  const R = Math.round(520 * (coneRangePercent / 100)); // Calibrated screen-pixel reach
+                  const xRay = Math.round(R * 0.866);
+                  const yRay = Math.round(R * 0.5);
+                  const R_near = Math.round(R * 0.38);
+                  const xNear = Math.round(R_near * 0.866);
+                  const yNear = Math.round(R_near * 0.5);
+                  const R_mid = Math.round(R * 0.70);
+                  const xMid = Math.round(R_mid * 0.866);
+                  const yMid = Math.round(R_mid * 0.5);
+                  const svgSize = (R + 60) * 2;
+                  const half = R + 60;
 
-                {/* Aim cycler button on badge */}
-                <button
+                  return (
+                    <svg
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        width: `${svgSize}px`,
+                        height: `${svgSize}px`,
+                        overflow: 'visible',
+                        zIndex: 1,
+                      }}
+                      viewBox={`-${half} -${half} ${svgSize} ${svgSize}`}
+                    >
+                      <defs>
+                        <radialGradient id="cctv-range-glow" cx="0" cy="0" r={R} gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stopColor="#0284c7" stopOpacity="0.45" />
+                          <stop offset="35%" stopColor="#38bdf8" stopOpacity="0.25" />
+                          <stop offset="70%" stopColor="#0284c7" stopOpacity="0.14" />
+                          <stop offset="100%" stopColor="#0284c7" stopOpacity="0.04" />
+                        </radialGradient>
+                      </defs>
+
+                      <g transform={`rotate(${rotation}, 0, 0)`} style={{ transformOrigin: '0px 0px' }}>
+                        {/* 1. Main Optical Volume Wedge */}
+                        <path
+                          d={camAimAngle === 90
+                            ? `M 0 0 L ${xRay} ${-yRay} A ${R} ${R} 0 0 1 ${xRay} ${yRay} Z`
+                            : `M 0 0 L ${-xRay} ${-yRay} A ${R} ${R} 0 0 0 ${-xRay} ${yRay} Z`
+                          }
+                          fill="url(#cctv-range-glow)"
+                        />
+
+                        {/* 2. Outer Frustum Boundary Rays */}
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2={camAimAngle === 90 ? xRay : -xRay}
+                          y2={-yRay}
+                          stroke="#0284c7"
+                          strokeWidth="1.8"
+                          strokeDasharray="6 3"
+                          opacity={0.8}
+                        />
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2={camAimAngle === 90 ? xRay : -xRay}
+                          y2={yRay}
+                          stroke="#0284c7"
+                          strokeWidth="1.8"
+                          strokeDasharray="6 3"
+                          opacity={0.8}
+                        />
+
+                        {/* 3. Curved Range Limit Boundary Arc (At Outer Range R) */}
+                        <path
+                          d={camAimAngle === 90
+                            ? `M ${xRay} ${-yRay} A ${R} ${R} 0 0 1 ${xRay} ${yRay}`
+                            : `M ${-xRay} ${-yRay} A ${R} ${R} 0 0 0 ${-xRay} ${yRay}`
+                          }
+                          fill="none"
+                          stroke="#0284c7"
+                          strokeWidth="2.5"
+                          strokeDasharray="6 3"
+                          opacity={0.9}
+                        />
+
+                        {/* 4. Near Distance Range Arc (5M) */}
+                        <path
+                          d={camAimAngle === 90
+                            ? `M ${xNear} ${-yNear} A ${R_near} ${R_near} 0 0 1 ${xNear} ${yNear}`
+                            : `M ${-xNear} ${-yNear} A ${R_near} ${R_near} 0 0 0 ${-xNear} ${yNear}`
+                          }
+                          fill="none"
+                          stroke="#0284c7"
+                          strokeWidth="1"
+                          strokeDasharray="4 3"
+                          opacity={0.55}
+                        />
+                        <text
+                          x={camAimAngle === 90 ? R_near + 4 : -R_near - 22}
+                          y="-4"
+                          fill="#0284c7"
+                          fontSize="9"
+                          fontFamily="monospace"
+                          fontWeight="bold"
+                        >
+                          5M
+                        </text>
+
+                        {/* 5. Mid Distance Range Arc (10M) */}
+                        <path
+                          d={camAimAngle === 90
+                            ? `M ${xMid} ${-yMid} A ${R_mid} ${R_mid} 0 0 1 ${xMid} ${yMid}`
+                            : `M ${-xMid} ${-yMid} A ${R_mid} ${R_mid} 0 0 0 ${-xMid} ${yMid}`
+                          }
+                          fill="none"
+                          stroke="#0284c7"
+                          strokeWidth="1.2"
+                          strokeDasharray="4 3"
+                          opacity={0.6}
+                        />
+                        <text
+                          x={camAimAngle === 90 ? R_mid + 4 : -R_mid - 26}
+                          y="-4"
+                          fill="#0284c7"
+                          fontSize="9"
+                          fontFamily="monospace"
+                          fontWeight="bold"
+                        >
+                          10M
+                        </text>
+
+                        {/* 6. Optical Boresight Center Axis */}
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2={camAimAngle === 90 ? R : -R}
+                          y2="0"
+                          stroke="#0284c7"
+                          strokeWidth="1.2"
+                          strokeDasharray="6 4"
+                          opacity={0.5}
+                        />
+
+                        {/* 7. Tactical Range Limit Badge on the Outer Arc */}
+                        <g transform={`translate(${camAimAngle === 90 ? R : -R}, 0)`}>
+                          <line x1="0" y1="-10" x2="0" y2="10" stroke="#0284c7" strokeWidth="2.5" />
+                          <rect
+                            x="-38"
+                            y="-18"
+                            width="76"
+                            height="16"
+                            rx="3"
+                            fill="#082f49"
+                            stroke="#38bdf8"
+                            strokeWidth="1"
+                            opacity="0.95"
+                          />
+                          <text
+                            x="0"
+                            y="-7"
+                            textAnchor="middle"
+                            fill="#38bdf8"
+                            fontSize="8"
+                            fontFamily="monospace"
+                            fontWeight="bold"
+                          >
+                            RANGE {coneRangePercent}%
+                          </text>
+                        </g>
+
+                        {/* 8. Lens Emitter Optical Rings at (0, 0) */}
+                        <circle cx="0" cy="0" r="18" fill="#0284c7" fillOpacity="0.22" stroke="#0284c7" strokeWidth="1.2" strokeDasharray="3 3" />
+                        <circle cx="0" cy="0" r="10" fill="#0284c7" fillOpacity="0.55" stroke="#ffffff" strokeWidth="0.8" />
+                        <circle cx="0" cy="0" r="4" fill="#ffffff" />
+                      </g>
+                    </svg>
+                  );
+                })()}
+
+                {/* 2. Precision Circular CCTV Lens Turret: Zero Gap Emitter & Direction Controller */}
+                <div
+                  onPointerDown={handlePointerDownCam}
                   onClick={(e) => {
                     e.stopPropagation();
-                    playHapticSound('click');
-                    setCamAimAngle((prev) => {
-                      if (prev === null) return 0;
-                      if (prev === 270) return null;
-                      return prev + 90;
-                    });
+                    if (!isDraggingCam) {
+                      playHapticSound('click');
+                      // Quick flip aim direction on click
+                      setCamAimAngle((prev) => (prev === 90 ? 270 : 90));
+                    }
                   }}
-                  title={`Aim: ${camAimAngle !== null ? camAimAngle + '°' : 'Auto'}. Click to rotate.`}
-                  className="px-1 py-0.2 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[6.5px] font-bold cursor-pointer"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing shadow-xl border-2 transition-all relative group ${
+                    isDraggingCam
+                      ? 'bg-sky-950 border-sky-400 scale-110 shadow-sky-500/40 ring-2 ring-sky-300'
+                      : activeCameraFilter === 'CAM-01'
+                      ? 'bg-neutral-950 border-sky-400 ring-2 ring-sky-300 shadow-sky-400/20'
+                      : 'bg-neutral-900 border-white hover:border-sky-300 hover:scale-105'
+                  }`}
+                  title={`CCTV Camera: Aiming ${camAimAngle === 90 ? 'Right (East)' : 'Left (West)'}. Click to switch aim direction, or drag along track.`}
                 >
-                  {camAimAngle !== null ? `${camAimAngle}°` : 'Auto'}
-                </button>
+                  {/* Subtle Overhead Track Bracket */}
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-1 bg-neutral-600 rounded-t-xs" />
 
-                {/* Remove button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    playHapticSound('snap');
-                    setCustomCamPos(null);
-                    setIsPlacingCam(false);
-                    setActiveCameraFilter(null);
-                  }}
-                  title="Remove CCTV Camera from room"
-                  className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-neutral-400 hover:text-rose-600 hover:bg-rose-50 text-[8px] font-bold cursor-pointer"
-                >
-                  ✕
-                </button>
+                  {/* Directional Camera Lens Icon pointing Left or Right */}
+                  <div className={`transition-transform duration-300 flex items-center justify-center ${
+                    camAimAngle === 270 ? 'rotate-180 text-sky-400' : 'text-sky-400'
+                  }`}>
+                    <Camera size={13} />
+                  </div>
+
+                  {/* Direction Aim Arrow Badge */}
+                  <div className={`absolute ${camAimAngle === 90 ? '-right-1.5' : '-left-1.5'} top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-sky-500 text-white flex items-center justify-center shadow-xs text-[6.5px] pointer-events-none font-bold`}>
+                    {camAimAngle === 90 ? '▶' : '◀'}
+                  </div>
+                </div>
               </div>
             ) : isPlacingCam ? (
               /* Placement Active Crosshair Marker */
@@ -1103,15 +1434,53 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
                     transform: 'translate(-50%, -50%)',
                     pointerEvents: 'none',
                   }}
-                  className="z-30 h-6 px-2 rounded-full bg-sky-600/90 text-white shadow-lg font-mono text-[7.5px] flex items-center gap-1 border border-white/50 animate-pulse select-none"
+                  className="z-30 select-none relative w-8 h-8 flex items-center justify-center"
                 >
-                  <MapPin size={9} />
-                  <span>Click to Mount CAM-01</span>
+                  {/* Ghost Vision Cone Territory Preview */}
+                  {(() => {
+                    const R = Math.round(520 * (coneRangePercent / 100));
+                    const xRay = Math.round(R * 0.866);
+                    const yRay = Math.round(R * 0.5);
+                    const svgSize = (R + 60) * 2;
+                    const half = R + 60;
+
+                    return (
+                      <svg
+                        className="absolute pointer-events-none -z-10 opacity-60"
+                        style={{
+                          left: '50%',
+                          top: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          width: `${svgSize}px`,
+                          height: `${svgSize}px`,
+                          overflow: 'visible',
+                        }}
+                        viewBox={`-${half} -${half} ${svgSize} ${svgSize}`}
+                      >
+                        <g transform={`rotate(${rotation}, 0, 0)`} style={{ transformOrigin: '0px 0px' }}>
+                          <path
+                            d={camAimAngle === 270
+                              ? `M 0 0 L ${-xRay} ${-yRay} A ${R} ${R} 0 0 0 ${-xRay} ${yRay} Z`
+                              : `M 0 0 L ${xRay} ${-yRay} A ${R} ${R} 0 0 1 ${xRay} ${yRay} Z`
+                            }
+                            fill="#0284c7"
+                            fillOpacity="0.22"
+                            stroke="#0284c7"
+                            strokeWidth="1.5"
+                            strokeDasharray="4 4"
+                          />
+                        </g>
+                      </svg>
+                    );
+                  })()}
+                  <div className="w-8 h-8 rounded-full bg-neutral-900 border-2 border-sky-400 flex items-center justify-center opacity-75 shadow-lg">
+                    <Camera size={13} className="text-sky-400" />
+                  </div>
                 </div>
               ) : (
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-25 pointer-events-none bg-sky-950/80 text-white backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-sky-400/50 shadow-2xl flex items-center gap-2 text-3xs font-mono animate-pulse">
                   <MapPin size={12} className="text-sky-400 animate-bounce" />
-                  <span>Click anywhere on floorplan to mount CCTV Camera</span>
+                  <span>Click anywhere along central aisle to mount CCTV Camera</span>
                 </div>
               )
             ) : null
@@ -1147,15 +1516,39 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
             })()
           )}
 
-          {/* ---------------- 4. CENTRAL PROCTOR WALKWAY ---------------- */}
+          {/* ---------------- 4. CENTRAL PROCTOR WALKWAY & OVERHEAD CEILING CAMERA RAIL ---------------- */}
           {!isPortrait ? (
-            <div className="absolute top-[50%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-5 w-3/4 py-0.5 px-3 rounded-md border border-dashed border-neutral-300 bg-neutral-50/70 flex items-center justify-center font-mono text-[7px] sm:text-[8px] font-bold text-neutral-400 tracking-wider pointer-events-none">
-              <span>[ CENTRAL PROCTOR WALKWAY • 2.4M SEPARATION AISLE ]</span>
-            </div>
+            <>
+              {/* Overhead Motorized CCTV Ceiling Track Rail */}
+              {cameraMode === 'single' && (
+                <div className="absolute top-[50%] left-[8%] right-[8%] -translate-y-1/2 z-6 h-[2px] bg-neutral-300/80 pointer-events-none rounded-full flex items-center justify-between px-6 opacity-60">
+                  <span className="w-1 h-2 bg-neutral-400 rounded-xs" />
+                  <span className="w-1 h-2 bg-neutral-400 rounded-xs" />
+                  <span className="w-1 h-2 bg-neutral-400 rounded-xs" />
+                  <span className="w-1 h-2 bg-neutral-400 rounded-xs" />
+                  <span className="w-1 h-2 bg-neutral-400 rounded-xs" />
+                </div>
+              )}
+              <div className="absolute top-[50%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-5 w-3/4 py-0.5 px-3 rounded-md border border-dashed border-neutral-300 bg-neutral-50/70 flex items-center justify-center font-mono text-[7px] sm:text-[8px] font-bold text-neutral-400 tracking-wider pointer-events-none">
+                <span>[ CENTRAL PROCTOR WALKWAY • 2.4M SEPARATION AISLE ]</span>
+              </div>
+            </>
           ) : (
-            <div className="absolute left-[50%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-5 h-3/4 w-6 py-3 px-0.5 rounded-md border border-dashed border-neutral-300 bg-neutral-50/70 flex items-center justify-center font-mono text-[7px] sm:text-[8px] font-bold text-neutral-400 tracking-wider pointer-events-none [writing-mode:vertical-rl] rotate-180">
-              <span>[ CENTRAL PROCTOR WALKWAY • 2.4M AISLE ]</span>
-            </div>
+            <>
+              {/* Overhead Motorized CCTV Ceiling Track Rail (Vertical) */}
+              {cameraMode === 'single' && (
+                <div className="absolute left-[50%] top-[8%] bottom-[8%] -translate-x-1/2 z-6 w-[2px] bg-neutral-300/80 pointer-events-none rounded-full flex flex-col items-center justify-between py-6 opacity-60">
+                  <span className="h-1 w-2 bg-neutral-400 rounded-xs" />
+                  <span className="h-1 w-2 bg-neutral-400 rounded-xs" />
+                  <span className="h-1 w-2 bg-neutral-400 rounded-xs" />
+                  <span className="h-1 w-2 bg-neutral-400 rounded-xs" />
+                  <span className="h-1 w-2 bg-neutral-400 rounded-xs" />
+                </div>
+              )}
+              <div className="absolute left-[50%] top-1/2 -translate-x-1/2 -translate-y-1/2 z-5 h-3/4 w-6 py-3 px-0.5 rounded-md border border-dashed border-neutral-300 bg-neutral-50/70 flex items-center justify-center font-mono text-[7px] sm:text-[8px] font-bold text-neutral-400 tracking-wider pointer-events-none [writing-mode:vertical-rl] rotate-180">
+                <span>[ CENTRAL PROCTOR WALKWAY • 2.4M AISLE ]</span>
+              </div>
+            </>
           )}
 
           {/* ---------------- 5. DYNAMIC WORKSTATION CARDS (ROTATED) ---------------- */}
@@ -1338,24 +1731,82 @@ export const ExamHallMap: React.FC<ExamHallMapProps> = ({
               </div>
             </motion.div>
           ) : (
-            <div className="p-2 text-center text-3xs text-neutral-500 bg-white rounded-lg border border-neutral-200 font-mono flex items-center justify-center gap-3">
-              {customCamPos ? (
-                <span>
-                  💡 <strong>CAM-01</strong> mounted at ({customCamPos.x}%, {customCamPos.y}%). Drag it anywhere in the room, or click <strong>Reposition</strong> / <strong>Remove</strong>.
-                </span>
-              ) : (
-                <span>
-                  💡 <strong>CCTV Camera is unplaced.</strong> Click <strong>📍 Place Camera</strong> or drag the CAM-01 token to mount a CCTV camera anywhere in the hall.
-                </span>
-              )}
-              {activeCameraFilter && (
-                <button
-                  onClick={() => setActiveCameraFilter(null)}
-                  className="text-sky-600 font-bold underline cursor-pointer ml-1"
-                >
-                  Reset {activeCameraFilter} filter
-                </button>
-              )}
+            <div className="p-3 bg-white rounded-xl border border-neutral-200 font-mono text-3xs shadow-xs space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-neutral-100">
+                <div className="flex items-center gap-2">
+                  <span className="font-heading font-bold text-xs text-neutral-900 flex items-center gap-1.5">
+                    <Camera size={13} className="text-sky-600" />
+                    <span>CCTV Field-of-View Coverage Range</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[8px]">
+                    {coverageData.coveredCount}/{seats.length} Students Monitored ({coverageData.percent}% FOV)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[8px]">
+                  {customCamPos && (
+                    <>
+                      <span className="text-neutral-400 font-bold uppercase">Mount:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-800 font-bold">
+                        Aisle Track ({customCamPos.x}%)
+                      </span>
+                      <span className="text-neutral-400 font-bold uppercase ml-1">Direction:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200 font-bold">
+                        {camAimAngle === 90 ? '▶ East (Right)' : '◀ West (Left)'}
+                      </span>
+                    </>
+                  )}
+                  {activeCameraFilter && (
+                    <button
+                      onClick={() => setActiveCameraFilter(null)}
+                      className="text-sky-600 font-bold underline cursor-pointer ml-1"
+                    >
+                      Reset filter
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[8px]">
+                <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200/80">
+                  <div className="text-emerald-700 font-bold uppercase tracking-wider text-[7px] mb-0.5">
+                    Covered Students Range
+                  </div>
+                  <div className="font-heading font-black text-sm text-emerald-950">
+                    {coverageData.candidateRange}
+                  </div>
+                  <div className="text-emerald-800/80 text-[7.5px] mt-0.5">
+                    {coverageData.coveredCount} active candidates inside optical line-of-sight
+                  </div>
+                </div>
+
+                <div className="p-2 rounded-lg bg-sky-50/70 border border-sky-200/80">
+                  <div className="text-sky-700 font-bold uppercase tracking-wider text-[7px] mb-0.5">
+                    Covered Workstation Terminals
+                  </div>
+                  <div className="font-mono font-bold text-xs text-sky-950 flex flex-col gap-0.5">
+                    <span>Row A: {coverageData.rowARange}</span>
+                    <span>Row B: {coverageData.rowBRange}</span>
+                  </div>
+                  <div className="text-sky-800/80 text-[7.5px] mt-0.5">
+                    Dual-row sweeping vision cone
+                  </div>
+                </div>
+
+                <div className="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
+                  <div className="text-neutral-500 font-bold uppercase tracking-wider text-[7px] mb-0.5">
+                    Blind Spot (Behind Camera Casing)
+                  </div>
+                  <div className="font-mono font-bold text-xs text-neutral-800">
+                    {coverageData.blindIds.length > 0 ? coverageData.blindIds.join(', ') : 'None (100% Coverage)'}
+                  </div>
+                  <div className="text-neutral-500 text-[7.5px] mt-0.5">
+                    {coverageData.blindIds.length > 0
+                      ? `${coverageData.blindIds.length} desks behind lens aperture (drag camera or switch aim)`
+                      : 'Zero blind spots'}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </AnimatePresence>

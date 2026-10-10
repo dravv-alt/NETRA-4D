@@ -62,6 +62,8 @@ scratch/
 scratch_eval/
 scratch_diag.py
 .system_generated/
+artifacts/
+.pytest-*/
 
 # Imported architecture-tool checkouts and local packaging metadata
 .archify/

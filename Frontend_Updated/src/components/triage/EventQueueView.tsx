@@ -159,8 +159,8 @@ export const EventQueueView: React.FC<EventQueueViewProps> = ({
   }, [activeCardIndex]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
-      <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs sm:p-7 flex flex-col lg:h-[calc(100vh-11rem)] lg:min-h-[660px]">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto font-sans text-xs sm:text-sm text-neutral-900">
+      <section className="rounded-2xl sm:rounded-3xl border border-neutral-200 bg-white p-3.5 sm:p-5 lg:p-7 shadow-xs flex flex-col lg:h-[calc(100dvh-10rem)] lg:max-h-[900px]">
       {/* Header Banner */}
       <div className="flex items-center justify-between pb-4 border-b border-neutral-200 flex-wrap gap-4 shrink-0">
         <div>

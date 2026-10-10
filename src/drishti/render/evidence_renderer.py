@@ -182,6 +182,26 @@ class EvidenceRenderer:
                     cv2.circle(canvas, pt, 3, joint_col, -1, cv2.LINE_AA)
                     cv2.circle(canvas, pt, 2, bone_col, -1, cv2.LINE_AA)
 
+    def render_person_boxes(
+        self,
+        canvas: np.ndarray,
+        candidates: Dict[str, Any],
+        invigilator_cand_ids: Set[str],
+    ) -> None:
+        """Render restrained candidate boxes; furniture is never boxed."""
+        h_img, w_img = canvas.shape[:2]
+        for cand_id, state in candidates.items():
+            if cand_id in invigilator_cand_ids or not getattr(state, "is_visible", True):
+                continue
+            obs = getattr(state, "current_observation", None)
+            if not obs:
+                continue
+            x1, y1, x2, y2 = obs.bbox_xyxy_norm
+            p1 = (max(0, int(x1 * w_img)), max(0, int(y1 * h_img)))
+            p2 = (min(w_img - 1, int(x2 * w_img)), min(h_img - 1, int(y2 * h_img)))
+            is_review = getattr(state, "behavioural_state", "NORMAL") in ("REVIEW", "SUSPICIOUS", "HIGH_PRIORITY_REVIEW", "ALERT")
+            cv2.rectangle(canvas, p1, p2, self.color_review_skeleton if is_review else self.color_normal_skeleton, 1, cv2.LINE_AA)
+
     def render_evidence_objects(
         self,
         canvas: np.ndarray,
@@ -325,7 +345,9 @@ class EvidenceRenderer:
         self,
         canvas: np.ndarray,
         candidates: Dict[str, Any],
-        invigilator_cand_ids: Set[str]
+        invigilator_cand_ids: Set[str],
+        show_tracking_ids: bool,
+        show_seat_mapping: bool,
     ) -> None:
         """Renders compact, semi-transparent pill badges above candidate heads."""
         h_img, w_img = canvas.shape[:2]
@@ -351,21 +373,30 @@ class EvidenceRenderer:
             y2 = min(h_img, int(bx_norm[3] * h_img))
 
             b_state = getattr(state, "behavioural_state", "NORMAL")
-            desk_id = getattr(state.identity, "workstation_id", "") or cand_id.replace("Candidate_", "Seat ")
+            workstation_id = getattr(state.identity, "workstation_id", "")
+            candidate_id = cand_id.replace("Candidate_", "Candidate ")
+            identifiers = []
+            if show_seat_mapping and workstation_id:
+                identifiers.append(str(workstation_id))
+            if show_tracking_ids:
+                identifiers.append(candidate_id)
+            identifier = " | ".join(identifiers)
 
             # Build compact badge text
             if b_state in ("HIGH_PRIORITY_REVIEW", "ALERT"):
-                tag = f"{desk_id} | ALERT: ANOMALY"
+                tag = f"{identifier + ' | ' if identifier else ''}ALERT: ANOMALY"
                 badge_border = self.color_alert_skeleton
                 badge_bg = (0, 0, 160)
             elif b_state in ("REVIEW", "SUSPICIOUS"):
                 is_peeking = getattr(state, "is_peeking_neighbour", False)
                 reason = "Peeking" if is_peeking else "Suspicious"
-                tag = f"{desk_id} | REVIEW: {reason}"
+                tag = f"{identifier + ' | ' if identifier else ''}REVIEW: {reason}"
                 badge_border = self.color_review_skeleton
                 badge_bg = (0, 90, 160)
             else:
-                tag = f"{desk_id}"
+                if not identifier:
+                    continue
+                tag = identifier
                 badge_border = (80, 90, 80)
                 badge_bg = (20, 24, 25)
 
@@ -454,7 +485,8 @@ class EvidenceRenderer:
         frame_idx: int,
         total_frames: int,
         fps: float,
-        active_alerts: List[str]
+        active_alerts: List[str],
+        layers: Optional[Dict[str, bool]] = None,
     ) -> np.ndarray:
         """
         Master render pipeline executing operations in strict visual layers:
@@ -466,25 +498,40 @@ class EvidenceRenderer:
         6. Candidate Pill Badges (compact)
         7. Minimalist Surveillance HUD (top bar)
         """
-        # Layer 1: Face Privacy Blur on raw frame
+        preferences = {
+            "personBoxes": True, "trackingIds": True, "poseSkeleton": True,
+            "objects": True, "seatMapping": True, "attentionRays": True,
+            "behaviorEvents": True, "threeDVector": False,
+        }
+        if layers:
+            preferences.update({key: value for key, value in layers.items() if key in preferences and isinstance(value, bool)})
+
+        # Privacy is mandatory and cannot be disabled by visual-layer controls.
         canvas = self.apply_face_privacy(raw_frame, tracked_people)
 
-        # Layer 2: 2D Candidate Skeletons (Zero invigilator skeletons)
-        self.render_candidate_skeletons(canvas, candidates, invigilator_cand_ids)
+        if preferences["personBoxes"]:
+            self.render_person_boxes(canvas, candidates, invigilator_cand_ids)
+        if preferences["poseSkeleton"]:
+            self.render_candidate_skeletons(canvas, candidates, invigilator_cand_ids)
 
-        # Layer 3: Targeted Evidence Objects (phones only, zero furniture)
-        self.render_evidence_objects(canvas, detected_objects)
+        if preferences["objects"]:
+            self.render_evidence_objects(canvas, detected_objects)
 
-        # Layer 4: Hand Anomalies (Chit / Paper retrieval focal rings)
-        self.render_hand_anomalies(canvas, candidates, invigilator_cand_ids)
+        if preferences["behaviorEvents"]:
+            self.render_hand_anomalies(canvas, candidates, invigilator_cand_ids)
 
-        # Layer 5: Gaze Vectors
-        self.render_gaze_arrows(canvas, candidates, invigilator_cand_ids)
+        if preferences["attentionRays"]:
+            self.render_gaze_arrows(canvas, candidates, invigilator_cand_ids)
 
-        # Layer 6: Compact Candidate Pills
-        self.render_candidate_pills(canvas, candidates, invigilator_cand_ids)
+        if preferences["trackingIds"] or preferences["seatMapping"]:
+            self.render_candidate_pills(
+                canvas, candidates, invigilator_cand_ids,
+                preferences["trackingIds"], preferences["seatMapping"],
+            )
 
-        # Layer 7: Minimalist Surveillance HUD
-        self.render_surveillance_hud(canvas, video_title, frame_idx, total_frames, fps, active_alerts)
+        self.render_surveillance_hud(
+            canvas, video_title, frame_idx, total_frames, fps,
+            active_alerts if preferences["behaviorEvents"] else [],
+        )
 
         return canvas

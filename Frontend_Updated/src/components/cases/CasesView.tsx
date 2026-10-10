@@ -47,39 +47,39 @@ export const CasesView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
+    <div className="space-y-4 sm:space-y-8 max-w-7xl mx-auto font-sans text-xs sm:text-sm text-neutral-900">
       {/* 1. STANDARDIZED PAGE HEADER */}
-      <div className="pb-6 border-b border-neutral-200/80">
-        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-neutral-500 mb-2">
+      <div className="pb-4 sm:pb-6 border-b border-neutral-200/80">
+        <div className="flex items-center gap-2 text-2xs sm:text-xs font-mono uppercase tracking-widest text-neutral-500 mb-1.5 sm:mb-2">
           <FileCheck size={13} className="text-neutral-700" />
           <span>INSTITUTIONAL DISCIPLINARY RECORDS • SHA-256 IMMUTABLE</span>
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold font-heading text-neutral-950 tracking-tight">
+            <h1 className="text-xl sm:text-3xl md:text-4xl font-extrabold font-heading text-neutral-950 tracking-tight">
               Formal Incident Cases & Audit Records
             </h1>
-            <p className="text-neutral-600 text-sm mt-1.5 max-w-2xl leading-relaxed">
+            <p className="text-neutral-600 text-xs sm:text-sm mt-1 sm:mt-1.5 max-w-2xl leading-relaxed">
               Cryptographically sealed incident packages ready for university disciplinary boards and examination controller review.
             </p>
           </div>
-          <span className="text-xs font-mono font-bold text-neutral-900 px-3.5 py-1.5 rounded-full bg-white border border-neutral-200 shadow-2xs">
+          <span className="text-2xs sm:text-xs font-mono font-bold text-neutral-900 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full bg-white border border-neutral-200 shadow-2xs">
             2 ACTIVE CASES
           </span>
         </div>
       </div>
 
       {/* Cases List */}
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         {cases.map((c) => (
           <div
             key={c.id}
-            className="p-8 space-y-6 bg-white border border-neutral-200/80 shadow-[0_20px_40px_rgba(0,0,0,0.035)] rounded-[2rem]"
+            className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 bg-white border border-neutral-200/80 shadow-[0_20px_40px_rgba(0,0,0,0.035)] rounded-2xl sm:rounded-[2rem]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between pb-5 border-b border-neutral-200/80 flex-wrap gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-neutral-900 flex items-center justify-center text-white font-bold shadow-xs">
+            <div className="flex items-center justify-between pb-4 sm:pb-5 border-b border-neutral-200/80 flex-wrap gap-3 sm:gap-4">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-neutral-900 flex items-center justify-center text-white font-bold shadow-xs shrink-0">
                   <Lock size={18} />
                 </div>
                 <div>

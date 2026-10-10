@@ -41,7 +41,7 @@ export const SystemHealthModal: React.FC<SystemHealthModalProps> = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
           transition={{ type: 'spring', damping: 26, stiffness: 350 }}
-          className="relative z-50 w-full max-w-2xl bg-white border border-neutral-200 rounded-2xl p-6 font-mono text-xs shadow-2xl space-y-5 text-neutral-900"
+          className="relative z-50 w-full max-w-2xl bg-white border border-neutral-200 rounded-2xl p-4 sm:p-6 font-mono text-xs shadow-2xl space-y-4 sm:space-y-5 text-neutral-900 max-h-[min(92dvh,750px)] overflow-y-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-neutral-200">

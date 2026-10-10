@@ -180,7 +180,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       <aside
         onMouseEnter={() => setIsSidebarHovered(true)}
         onMouseLeave={() => setIsSidebarHovered(false)}
-        className={`fixed left-4 top-4 bottom-4 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-col justify-between bg-white/95 backdrop-blur-2xl border border-neutral-200/90 shadow-[0_20px_40px_rgba(0,0,0,0.06)] overflow-hidden ${
+        className={`hidden md:flex fixed left-4 top-4 bottom-4 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] flex-col justify-between bg-white/95 backdrop-blur-2xl border border-neutral-200/90 shadow-[0_20px_40px_rgba(0,0,0,0.06)] overflow-hidden ${
           isSidebarHovered
             ? 'w-64 rounded-[2rem] shadow-[0_24px_64px_rgba(0,0,0,0.12)] p-4.5'
             : 'w-16 rounded-[2.25rem] p-2.5 items-center'
@@ -189,7 +189,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         {/* Top: Brand Emblem & Title */}
         <div className="w-full">
           <div className={`flex items-center gap-3 ${!isSidebarHovered ? 'justify-center' : 'px-1'}`}>
-            <div className="w-10 h-10 rounded-2xl bg-[#181716] text-white flex items-center justify-center font-heading font-extrabold text-sm shadow-sm shrink-0 ring-4 ring-neutral-100">
+            <div className="w-10 h-10 rounded-2xl bg-[#181716] text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0 ring-4 ring-neutral-100">
               <Shield size={18} className="text-white" />
             </div>
             {isSidebarHovered && (
@@ -199,9 +199,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                 exit={{ opacity: 0 }}
                 className="overflow-hidden min-w-0"
               >
-                <div className="font-heading font-extrabold tracking-tight text-sm text-neutral-950 flex items-center gap-2">
+                <div className="font-bold font-sans tracking-tight text-sm text-neutral-950 flex items-center gap-2">
                   <span>NETRA-4D</span>
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-full">
+                  <span className="text-3xs font-mono font-bold px-2 py-0.5 bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-full">
                     v2.4
                   </span>
                 </div>
@@ -218,7 +218,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Group 1: Live Operations */}
           <div className="space-y-1 w-full">
             {isSidebarHovered && (
-              <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider px-3 pb-1 font-sans">
+              <div className="text-2xs font-semibold text-neutral-400 uppercase tracking-wider px-3 pb-1 font-sans">
                 Live Operations
               </div>
             )}
@@ -257,14 +257,14 @@ export const AppShell: React.FC<AppShellProps> = ({
 
                   {/* Expanded Pill Badge */}
                   {isSidebarHovered && item.badge && (
-                    <span className="relative z-10 px-2 py-0.5 text-[10px] rounded-full bg-amber-500 text-white font-mono font-bold tabular-nums">
+                    <span className="relative z-10 px-2 py-0.5 text-3xs rounded-full bg-amber-500 text-white font-mono font-bold tabular-nums">
                       {item.badge}
                     </span>
                   )}
 
                   {/* Collapsed Mini Badge */}
                   {!isSidebarHovered && item.badge && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold flex items-center justify-center shadow-xs ring-2 ring-white">
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white font-mono text-4xs font-bold flex items-center justify-center shadow-xs ring-2 ring-white">
                       {item.badge}
                     </span>
                   )}
@@ -281,7 +281,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Group 2: Audit & Intelligence */}
           <div className="space-y-1 w-full">
             {isSidebarHovered && (
-              <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider px-3 pb-1 pt-1 font-sans">
+              <div className="text-2xs font-semibold text-neutral-400 uppercase tracking-wider px-3 pb-1 pt-1 font-sans">
                 Audit & Intelligence
               </div>
             )}
@@ -366,31 +366,42 @@ export const AppShell: React.FC<AppShellProps> = ({
       </aside>
 
       {/* MAIN VIEW AREA */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#FAF9F6] relative pl-24 sm:pl-28">
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#FAF9F6] relative pl-0 md:pl-20 lg:pl-24 xl:pl-28">
         {/* TOP STATUS BAR */}
-        <header className="h-16 px-8 bg-white/90 backdrop-blur-md border-b border-neutral-200/80 flex items-center justify-between z-10 shrink-0">
-          <div className="flex items-center gap-4 sm:gap-6">
+        <header className="h-14 sm:h-16 px-3 sm:px-6 lg:px-8 bg-white/90 backdrop-blur-md border-b border-neutral-200/80 flex items-center justify-between z-10 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-6">
+            {/* Mobile Brand Emblem & Title */}
+            <div className="flex items-center gap-2 md:hidden">
+              <div className="w-8 h-8 rounded-xl bg-[#181716] text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
+                <Shield size={15} className="text-white" />
+              </div>
+              <div className="font-bold font-sans tracking-tight text-sm text-neutral-950">
+                NETRA-4D
+              </div>
+            </div>
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold shadow-2xs font-sans">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span>Surveillance Grid Synchronized</span>
+              <span className="hidden sm:inline">Surveillance Grid Synchronized</span>
+              <span className="sm:hidden text-3xs font-mono font-bold">LIVE SYNC</span>
             </div>
             <div className="hidden md:flex items-center gap-2 text-xs text-neutral-500 font-mono">
               <span>API-linked live monitor</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
             <button
               onClick={() => {
                 playHapticSound('snap');
                 void getReport();
               }}
               disabled={reportStatus === 'loading'}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-black disabled:opacity-60 text-white text-xs font-sans font-semibold border border-neutral-900 shadow-2xs transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-black disabled:opacity-60 text-white text-xs font-sans font-semibold border border-neutral-900 shadow-2xs transition-colors cursor-pointer"
               title="Download the operational run, event log, temporal metrics, and evidence summary"
             >
               <Download size={13} />
-              <span>{reportStatus === 'loading' ? 'Building…' : reportStatus === 'saved' ? 'Report Saved' : reportStatus === 'error' ? 'Retry Report' : 'Get Report'}</span>
+              <span className="hidden sm:inline">{reportStatus === 'loading' ? 'Building…' : reportStatus === 'saved' ? 'Report Saved' : reportStatus === 'error' ? 'Retry Report' : 'Get Report'}</span>
+              <span className="sm:hidden">{reportStatus === 'loading' ? '…' : reportStatus === 'saved' ? 'Saved' : 'Report'}</span>
             </button>
 
             {/* Dock Visibility Toggle */}
@@ -399,7 +410,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 playHapticSound('click');
                 setShowFloatingDock(!showFloatingDock);
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-sans font-semibold transition-colors cursor-pointer border ${
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-sans font-semibold transition-colors cursor-pointer border ${
                 showFloatingDock
                   ? 'bg-neutral-900 text-white border-neutral-900'
                   : 'bg-white hover:bg-neutral-50 text-neutral-700 border-neutral-300 shadow-2xs'
@@ -417,10 +428,11 @@ export const AppShell: React.FC<AppShellProps> = ({
                   playHapticSound('click');
                   setDemoMenuOpen(!demoMenuOpen);
                 }}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-50 text-xs font-semibold text-neutral-900 shadow-2xs cursor-pointer transition-colors font-sans"
+                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-50 text-xs font-semibold text-neutral-900 shadow-2xs cursor-pointer transition-colors font-sans"
               >
                 <Sparkles size={13} className="text-amber-500" />
-                <span>Story Mode / Presets</span>
+                <span className="hidden sm:inline">Story Mode / Presets</span>
+                <span className="sm:hidden">Presets</span>
                 <ChevronDown size={13} className="text-neutral-500" />
               </button>
 
@@ -469,22 +481,35 @@ export const AppShell: React.FC<AppShellProps> = ({
                 playHapticSound('snap');
                 setIsHealthOpen(true);
               }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-mono font-semibold text-neutral-800 border border-neutral-200 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-mono font-semibold text-neutral-800 border border-neutral-200 transition-colors cursor-pointer"
             >
               <Cpu size={13} />
-              <span>Pipeline Runtime</span>
+              <span className="hidden sm:inline">Pipeline Runtime</span>
             </button>
           </div>
         </header>
 
         {/* SCROLLABLE MAIN CANVAS CONTAINER */}
-        <main className="flex-1 overflow-y-auto px-6 sm:px-10 py-10 pb-36 max-w-7xl w-full mx-auto">
+        <main className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-7 pb-24 md:pb-12 max-w-[min(100%,88rem)] w-full mx-auto">
           {children}
         </main>
 
-        {/* FLOATING MAGNETIC DOCK (TOGGLEABLE) */}
+        {/* MOBILE HANDSET BOTTOM DOCK (Mobile navigation bar) */}
+        <div className="fixed bottom-2 left-0 right-0 z-50 flex justify-center px-2 pointer-events-none md:hidden">
+          <div className="pointer-events-auto max-w-[calc(100vw-0.75rem)]">
+            <MagneticDock
+              items={dockItems}
+              iconSize={32}
+              maxScale={1.12}
+              magneticDistance={70}
+              className="gap-1 px-2 py-1.5 rounded-2xl shadow-[0_12px_36px_rgba(0,0,0,0.18)] border-neutral-300/80 max-w-full overflow-x-auto scrollbar-none"
+            />
+          </div>
+        </div>
+
+        {/* DESKTOP FLOATING MAGNETIC DOCK (TOGGLEABLE) */}
         {showFloatingDock && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+          <div className="hidden md:flex fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
             <MagneticDock items={dockItems} iconSize={42} />
           </div>
         )}

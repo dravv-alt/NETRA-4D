@@ -479,6 +479,42 @@ live_processes: dict[str, subprocess.Popen] = {}
 # canonical product path.  Existing sessions without this key remain product
 # sessions for backward compatibility.
 LIVE_OVERLAY_PROFILES = frozenset({"product_operator", "full_context"})
+# These are rendering preferences only. They never alter inference, evidence,
+# privacy filtering, or the underlying telemetry written by a live session.
+LIVE_RENDER_LAYER_DEFAULTS: dict[str, bool] = {
+    "personBoxes": True,
+    "trackingIds": True,
+    "poseSkeleton": True,
+    "objects": True,
+    "seatMapping": True,
+    "attentionRays": True,
+    "behaviorEvents": True,
+    "threeDVector": False,
+}
+
+
+def _validated_live_render_layers(value: Any) -> dict[str, bool]:
+    """Validate an explicit, complete server-rendered layer selection."""
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail="render layers must be a JSON object")
+    supplied = set(value)
+    expected = set(LIVE_RENDER_LAYER_DEFAULTS)
+    if supplied != expected:
+        raise HTTPException(
+            status_code=422,
+            detail=f"render layers must contain exactly: {', '.join(sorted(expected))}",
+        )
+    if any(type(value[key]) is not bool for key in expected):
+        raise HTTPException(status_code=422, detail="each render layer must be a boolean")
+    return {key: value[key] for key in LIVE_RENDER_LAYER_DEFAULTS}
+
+
+def _write_live_render_layers(publish_dir: Path, layers: dict[str, bool]) -> None:
+    """Atomically publish layer preferences for the independent inference worker."""
+    target = publish_dir / "render_layers.json"
+    temporary = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(layers, sort_keys=True), encoding="utf-8")
+    temporary.replace(target)
 
 
 def _live_runner_for(metadata: dict[str, Any]) -> str:
@@ -526,7 +562,10 @@ def _arm_live_session(
         "control_log_url": f"/api/live/sessions/{session_id}/controls",
         "experimental_phone_evidence": bool(experimental_phone_evidence),
         "overlay_profile": overlay_profile,
+        "render_layers_url": f"/api/live/sessions/{session_id}/render-layers",
+        "render_layers": dict(LIVE_RENDER_LAYER_DEFAULTS),
     }
+    _write_live_render_layers(publish_dir, metadata["render_layers"])
     if browser_settings is not None:
         browser_input = publish_dir / "browser_input"
         browser_input.mkdir()
@@ -568,6 +607,10 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
         "--live-publish-dir", str(publish_dir.relative_to(BASE_DIR)),
         "--output-dir", str((FINAL_OUTPUTS / "live_runs").relative_to(BASE_DIR)),
     ]
+    if runner == "run_live_webcam.py":
+        command.extend([
+            "--render-layers-file", str((publish_dir / "render_layers.json").relative_to(BASE_DIR)),
+        ])
     browser_settings = metadata.get("browser_settings")
     if browser_settings is not None:
         browser_input = publish_dir / "browser_input"
@@ -707,6 +750,32 @@ def list_live_sessions():
 def start_monitoring_session(session_id: str, operator: str = Query("INVIGILATOR", max_length=80)):
     """Begin inference only after an invigilator explicitly authorizes monitoring."""
     return _launch_live_process(session_id, operator)
+
+
+@app.post("/api/live/sessions/{session_id}/render-layers")
+async def update_live_render_layers(session_id: str, request: Request):
+    """Update only the renderer's visible layers for an existing live session."""
+    publish_dir = LIVE_ROOT / session_id
+    metadata_path = publish_dir / "session.json"
+    if not metadata_path.is_file():
+        raise HTTPException(status_code=404, detail="Live session not found")
+    metadata = _json(metadata_path)
+    if _live_runner_for(metadata) != "run_live_webcam.py":
+        raise HTTPException(
+            status_code=409,
+            detail="This session uses a renderer that does not support server-side layer controls",
+        )
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="render layers must be JSON") from exc
+    layers = _validated_live_render_layers(payload)
+    _write_live_render_layers(publish_dir, layers)
+    metadata["render_layers"] = layers
+    metadata["render_layers_updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_session_metadata(publish_dir, metadata)
+    _record_monitoring_action(publish_dir, "RENDER_LAYERS_UPDATED", "OPERATOR_UI")
+    return {"session_id": session_id, "render_layers": layers}
 
 
 @app.get("/api/live/sessions/{session_id}/controls")

@@ -175,7 +175,7 @@ export const SurveillanceAIQueryConsole: React.FC<SurveillanceAIQueryConsoleProp
             </p>
           </div>
         </div>
-        <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-neutral-900 text-white tracking-widest">
+        <span className="text-3xs font-mono font-bold px-2.5 py-1 rounded-full bg-neutral-900 text-white tracking-widest">
           GROQ · LLAMA-3.3-70B
         </span>
       </div>
@@ -221,7 +221,7 @@ export const SurveillanceAIQueryConsole: React.FC<SurveillanceAIQueryConsoleProp
                             <button
                               key={m.seatId}
                               onClick={() => { playHapticSound('click'); onSelectCandidate?.(m.seatId); }}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-neutral-200 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50 transition-colors cursor-pointer"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-neutral-200 text-3xs font-semibold text-neutral-700 hover:bg-neutral-50 transition-colors cursor-pointer"
                             >
                               <User size={9} />
                               {m.candidateName}
@@ -270,13 +270,13 @@ export const SurveillanceAIQueryConsole: React.FC<SurveillanceAIQueryConsoleProp
 
       {/* Quick prompts */}
       <div className="px-7 py-3 border-t border-neutral-100 flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] font-mono font-bold text-neutral-400 uppercase tracking-wider shrink-0">Try:</span>
+        <span className="text-3xs font-mono font-bold text-neutral-400 uppercase tracking-wider shrink-0">Try:</span>
         {QUICK_PROMPTS.slice(0, 3).map((p, i) => (
           <button
             key={i}
             onClick={() => handleSend(p)}
             disabled={loading}
-            className="px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-600 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-40"
+            className="px-2.5 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-600 text-2xs font-semibold transition-colors cursor-pointer disabled:opacity-40"
           >
             {p}
           </button>

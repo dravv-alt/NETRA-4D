@@ -38,23 +38,23 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   ];
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm text-neutral-900">
+    <div className="space-y-4 sm:space-y-8 max-w-7xl mx-auto font-sans text-xs sm:text-sm text-neutral-900">
       {/* 1. STANDARDIZED PAGE HEADER */}
-      <div className="pb-6 border-b border-neutral-200/80">
-        <div className="flex items-center gap-2.5 text-xs font-mono uppercase tracking-widest text-neutral-500 mb-2">
+      <div className="pb-4 sm:pb-6 border-b border-neutral-200/80">
+        <div className="flex items-center gap-2 text-2xs sm:text-xs font-mono uppercase tracking-widest text-neutral-500 mb-1.5 sm:mb-2">
           <IllustratedIcon icon={Activity} variant="sky" size="sm" />
           <span>REAL-TIME MULTI-MODAL TELEMETRY • SESSION CBT-A01</span>
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold font-heading text-neutral-950 tracking-tight">
+            <h1 className="text-xl sm:text-3xl md:text-4xl font-bold font-sans text-neutral-950 tracking-tight">
               Cohort Telemetry & Kinematic Intelligence
             </h1>
-            <p className="text-neutral-600 text-sm mt-1.5 max-w-2xl leading-relaxed">
+            <p className="text-neutral-600 text-xs sm:text-sm mt-1 sm:mt-1.5 max-w-2xl leading-relaxed">
               Longitudinal behavioral trails, candidate-to-PC context, temporal gaze proxies, interaction evidence, proctor coverage, and live pipeline health.
             </p>
           </div>
-          <span className="text-xs font-mono font-bold text-neutral-900 px-3.5 py-1.5 rounded-full bg-white border border-neutral-200 shadow-2xs">
+          <span className="text-2xs sm:text-xs font-mono font-bold text-neutral-900 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full bg-white border border-neutral-200 shadow-2xs">
             180 MIN SESSION
           </span>
         </div>
@@ -63,59 +63,59 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* ========================================================================= */}
       {/* MASTER SUITE 1: AI SURVEILLANCE QUERY ENGINE & INTEGRATED KPI INSETS */}
       {/* ========================================================================= */}
-      <div className="p-8 sm:p-9 rounded-[2.5rem] bg-white border border-neutral-200/90 shadow-[0_24px_50px_rgba(0,0,0,0.04)] space-y-7">
+      <div className="p-3.5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2rem] lg:rounded-[2.5rem] bg-white border border-neutral-200/90 shadow-[0_24px_50px_rgba(0,0,0,0.04)] space-y-4 sm:space-y-7">
         <SurveillanceAIQueryConsole onSelectCandidate={onSelectCandidate} />
 
         {/* 4 Inset KPI Cards with Illustrated Icons */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 pt-1">
           <div className="p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 flex items-center justify-between">
             <div className="space-y-0.5">
-              <div className="text-3xs font-mono font-bold uppercase tracking-wider text-neutral-500">
+              <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                 Flagged Signals
               </div>
-              <div className="font-heading font-extrabold text-2xl sm:text-3xl text-neutral-950 font-mono">
+              <div className="font-bold text-2xl sm:text-3xl text-neutral-950 font-mono tabular-nums tracking-tight">
                 10
               </div>
-              <div className="text-3xs text-neutral-500 font-mono">0.055 events / cand-hr</div>
+              <div className="text-xs text-neutral-500 font-sans">0.055 events / cand-hr</div>
             </div>
             <IllustratedIcon icon={Zap} variant="neutral" size="md" />
           </div>
 
           <div className="p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 flex items-center justify-between">
             <div className="space-y-0.5">
-              <div className="text-3xs font-mono font-bold uppercase tracking-wider text-neutral-500">
+              <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                 Risk Suppression
               </div>
-              <div className="font-heading font-extrabold text-2xl sm:text-3xl text-emerald-700 font-mono">
+              <div className="font-bold text-2xl sm:text-3xl text-emerald-700 font-mono tabular-nums tracking-tight">
                 60%
               </div>
-              <div className="text-3xs text-emerald-800 font-mono">6 spatial mask filtered</div>
+              <div className="text-xs text-emerald-800 font-sans">6 spatial mask filtered</div>
             </div>
             <IllustratedIcon icon={ShieldCheck} variant="emerald" size="md" />
           </div>
 
           <div className="p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 flex items-center justify-between">
             <div className="space-y-0.5">
-              <div className="text-3xs font-mono font-bold uppercase tracking-wider text-neutral-500">
+              <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                 Average Triage
               </div>
-              <div className="font-heading font-extrabold text-2xl sm:text-3xl text-neutral-950 font-mono">
+              <div className="font-bold text-2xl sm:text-3xl text-neutral-950 font-mono tabular-nums tracking-tight">
                 24s
               </div>
-              <div className="text-3xs text-neutral-500 font-mono">Under 30s SLA target</div>
+              <div className="text-xs text-neutral-500 font-sans">Under 30s SLA target</div>
             </div>
             <IllustratedIcon icon={Activity} variant="amber" size="md" />
           </div>
 
           <div className="p-5 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 flex items-center justify-between">
             <div className="space-y-0.5">
-              <div className="text-3xs font-mono font-bold uppercase tracking-wider text-neutral-500">
+              <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                 Confirmed Rate
               </div>
-              <div className="font-heading font-extrabold text-2xl sm:text-3xl text-rose-700 font-mono">
+              <div className="font-bold text-2xl sm:text-3xl text-rose-700 font-mono tabular-nums tracking-tight">
                 10%
               </div>
-              <div className="text-3xs text-rose-800 font-mono">1 confirmed case (A06)</div>
+              <div className="text-xs text-rose-800 font-sans">1 confirmed case (A06)</div>
             </div>
             <IllustratedIcon icon={Sparkles} variant="rose" size="md" />
           </div>
@@ -149,7 +149,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       <div className="p-8 sm:p-9 rounded-[2.5rem] bg-white border border-neutral-200/90 shadow-[0_24px_50px_rgba(0,0,0,0.04)] space-y-6">
         <div className="flex items-center justify-between pb-3 border-b border-neutral-200/80">
           <div>
-            <h3 className="font-heading font-extrabold text-xl text-neutral-950 tracking-tight">
+            <h3 className="font-bold font-sans text-lg sm:text-xl text-neutral-950 tracking-tight">
               Ingestion Quality & Human Review Disposition
             </h3>
             <p className="text-xs text-neutral-500 mt-0.5">
@@ -164,7 +164,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Review Outcome Distribution */}
           <div className="p-6 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-4">
-            <div className="font-heading font-bold text-sm text-neutral-950 flex items-center justify-between">
+            <div className="font-bold font-sans text-sm text-neutral-950 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <PieChart size={16} className="text-neutral-700" />
                 <span>Review Outcome Disposition</span>
@@ -192,7 +192,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
           {/* Camera Quality & Vision Ingestion Health */}
           <div className="p-6 rounded-2xl bg-[#F5F4F0] border border-neutral-200/60 space-y-3">
-            <div className="font-heading font-bold text-sm text-neutral-950 flex items-center justify-between">
+            <div className="font-bold font-sans text-sm text-neutral-950 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Camera size={16} className="text-neutral-700" />
                 <span>Camera Vision Quality Matrix</span>

@@ -31,10 +31,10 @@ export const ForensicAdjudicationMatrixMaster: React.FC<ForensicAdjudicationMatr
           </div>
 
           <div>
-            <h2 className="text-3xl font-extrabold font-heading tracking-tight text-white">
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white font-sans">
               SEAT A06 — CANDIDATE #6
             </h2>
-            <p className="text-xs text-neutral-400 font-mono mt-1">
+            <p className="text-xs text-neutral-400 font-sans mt-1">
               Unauthorized mobile device in lap zone • North Wall Desk / Station A06
             </p>
           </div>
@@ -42,23 +42,23 @@ export const ForensicAdjudicationMatrixMaster: React.FC<ForensicAdjudicationMatr
 
         {/* 3 Dark Inset Metric Cards */}
         <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-3xs font-mono uppercase text-neutral-400">FEEDS SYNCED</div>
-            <div className="font-heading font-extrabold text-2xl text-white font-mono">2</div>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-400 font-sans">FEEDS SYNCED</div>
+            <div className="font-bold text-2xl text-white font-mono tabular-nums">2</div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-3xs font-mono uppercase text-neutral-400">PEAK RISK</div>
-            <div className="font-heading font-extrabold text-2xl text-rose-400 font-mono">84%</div>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-400 font-sans">PEAK RISK</div>
+            <div className="font-bold text-2xl text-rose-400 font-mono tabular-nums">84%</div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-3xs font-mono uppercase text-neutral-400">TRIAGE SLA</div>
-            <div className="font-heading font-extrabold text-2xl text-emerald-400 font-mono">24s</div>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-2xs font-semibold uppercase tracking-wider text-neutral-400 font-sans">TRIAGE SLA</div>
+            <div className="font-bold text-2xl text-emerald-400 font-mono tabular-nums">24s</div>
           </div>
         </div>
 
-        <div className="text-3xs font-mono text-neutral-500 pt-2 border-t border-white/10">
+        <div className="text-2xs text-neutral-400 pt-2 border-t border-white/10 font-sans">
           Forensic evidence timeline locked under SHA-256 immutable session digest CBT-A01.
         </div>
       </div>

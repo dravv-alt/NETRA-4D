@@ -45,26 +45,34 @@ export const LayerControlWidget: React.FC<LayerControlWidgetProps> = ({
       </div>
 
       <div className="space-y-1">
-        {layerItems.map(({ key, label }) => {
+        {layerItems.map(({ key, label, desc }) => {
           const isChecked = layers[key];
+          const isAvailable = key !== 'threeDVector';
           return (
             <div
               key={key}
+              title={isAvailable ? desc : 'No validated 3D output is available to render'}
               onClick={() => {
+                if (!isAvailable) return;
                 playHapticSound('snap');
                 onToggleLayer(key);
               }}
-              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 cursor-pointer transition-colors select-none"
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg transition-colors select-none ${isAvailable ? 'hover:bg-neutral-100 cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             >
               <span className={`text-2xs truncate ${isChecked ? 'text-neutral-950 font-semibold' : 'text-neutral-500'}`}>
                 {label}
               </span>
 
-              <Switch
-                checked={isChecked}
-                onCheckedChange={() => onToggleLayer(key)}
-                size="sm"
-              />
+              <span onClick={(event) => event.stopPropagation()}>
+                <Switch
+                  checked={isChecked}
+                  onCheckedChange={() => {
+                    onToggleLayer(key);
+                  }}
+                  disabled={!isAvailable}
+                  size="sm"
+                />
+              </span>
             </div>
           );
         })}

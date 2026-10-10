@@ -244,7 +244,9 @@ def run_video03_review(
         manifest["elapsed_sec"] = perf_counter()-started
         manifest["processed_fps"] = manifest["frames"]/max(manifest["elapsed_sec"],1e-9)
         if "preprocessing" not in manifest or "stats" not in manifest["preprocessing"]:
-            manifest["preprocessing"] = service.preprocessing_summary()
+            preprocessing_summary = getattr(service, "preprocessing_summary", None)
+            if callable(preprocessing_summary):
+                manifest["preprocessing"] = preprocessing_summary()
         (output/("COMPLETE.json" if manifest.get("status")=="COMPLETE" else "INCOMPLETE.json")).write_text(json.dumps(manifest,indent=2),encoding="utf-8")
     print(json.dumps(manifest,indent=2),flush=True)
     return str(output/"annotated.mp4"),str(output/"unified_reasoning.jsonl")

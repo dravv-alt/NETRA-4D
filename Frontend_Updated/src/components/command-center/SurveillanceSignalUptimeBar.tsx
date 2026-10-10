@@ -51,7 +51,7 @@ export const SurveillanceSignalUptimeBar: React.FC = () => {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="font-heading font-extrabold text-xl text-white tracking-tight">
+            <span className="font-bold text-lg sm:text-xl text-white tracking-tight font-sans">
               Surveillance Stream Continuity
             </span>
           </div>
@@ -61,7 +61,7 @@ export const SurveillanceSignalUptimeBar: React.FC = () => {
         </div>
 
         <div className="text-right">
-          <span className="font-heading font-extrabold text-3xl sm:text-4xl text-white tracking-tight font-mono">
+          <span className="font-bold text-3xl sm:text-4xl text-white tracking-tight font-mono tabular-nums">
             99.8%
           </span>
         </div>

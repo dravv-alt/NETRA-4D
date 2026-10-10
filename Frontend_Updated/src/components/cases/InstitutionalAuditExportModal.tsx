@@ -32,12 +32,12 @@ export const InstitutionalAuditExportModal: React.FC<InstitutionalAuditExportMod
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm select-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/60 backdrop-blur-sm select-none">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="w-full max-w-3xl bg-white rounded-[2rem] border border-neutral-200 shadow-2xl p-8 space-y-6 font-sans max-h-[90vh] overflow-y-auto"
+          className="w-full max-w-3xl bg-white rounded-2xl sm:rounded-[2rem] border border-neutral-200 shadow-2xl p-4 sm:p-8 space-y-4 sm:space-y-6 font-sans max-h-[92dvh] overflow-y-auto"
         >
           {/* Modal Header */}
           <div className="flex items-center justify-between pb-4 border-b border-neutral-200">

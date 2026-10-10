@@ -297,7 +297,7 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
         {/* Dimmed Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -317,7 +317,7 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 10 }}
           transition={{ type: 'spring', damping: 26, stiffness: 350 }}
-          className="relative z-50 w-full max-w-5xl bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 font-sans text-sm shadow-2xl space-y-6 text-neutral-900 max-h-[90vh] flex flex-col"
+          className="relative z-50 w-full max-w-5xl bg-white border border-neutral-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-8 font-sans text-xs sm:text-sm shadow-2xl space-y-4 sm:space-y-6 text-neutral-900 max-h-[92dvh] flex flex-col"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-4 border-b border-neutral-200 shrink-0">
@@ -370,7 +370,7 @@ export const LabLayoutStudioModal: React.FC<LabLayoutStudioModalProps> = ({
           </div>
 
           {/* SCROLLABLE MAIN CONTENT */}
-          <div className="flex-1 overflow-y-auto pr-1 min-h-[380px]">
+          <div className="flex-1 overflow-y-auto pr-1 min-h-0">
             {/* ================= TAB 1: DRAG & DROP BUILDER ================= */}
             {activeTab === 'canvas' && (
               <div className="space-y-6">

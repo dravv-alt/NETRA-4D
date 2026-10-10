@@ -30,7 +30,7 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   const [showcaseSamples, setShowcaseSamples] = useState<any[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState('');
   const [fallbackActive, setFallbackActive] = useState(true);
-  const [showSourcePreview, setShowSourcePreview] = useState(true);
+  const [showSourcePreview, setShowSourcePreview] = useState(false);
   const [sampleTimeline, setSampleTimeline] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const browserStreamRef = useRef<MediaStream | null>(null);
@@ -40,6 +40,8 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   const browserPublishSettingsRef = useRef<{ width: number; height: number; fps: number } | null>(null);
   const browserSendingRef = useRef(false);
   const [invigilatorId, setInvigilatorId] = useState('INVIGILATOR');
+  const [experimentalPhoneEvidence, setExperimentalPhoneEvidence] = useState(false);
+  const [overlayProfile, setOverlayProfile] = useState<'full_context' | 'product_operator'>('full_context');
   const [monitoringBusy, setMonitoringBusy] = useState(false);
   const [activeProvider, setActiveProvider] = useState<AIProvider>('fusion');
   const [layers, setLayers] = useState<AILayersState>({
@@ -63,10 +65,36 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
 
   const handleToggleLayer = (key: keyof AILayersState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
-    if (!showSourcePreview) {
-      setShowSourcePreview(true);
-    }
   };
+
+  // The player deliberately has no browser-drawn duplicate overlay. Keep the
+  // selected layers in the live worker so the authoritative JPEG/MJPEG frame
+  // itself changes on the next processed frame.
+  useEffect(() => {
+    if (!session?.render_layers_url) return;
+    const controller = new AbortController();
+    const updateLayers = async () => {
+      try {
+        const response = await fetch(`${apiBase}${session.render_layers_url}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(layers),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const updated = await response.json();
+        setSession((previous: any) => previous?.session_id === updated.session_id
+          ? { ...previous, render_layers: updated.render_layers }
+          : previous);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setLiveError(`Could not update server-rendered layers: ${String(error)}`);
+        }
+      }
+    };
+    void updateLayers();
+    return () => controller.abort();
+  }, [apiBase, layers, session?.session_id, session?.render_layers_url]);
 
   const handleTimeUpdate = (currentTime: number) => {
     if (sampleTimeline.length === 0 || session) return;
@@ -225,7 +253,7 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
       const width = settings.width || video.videoWidth || 640;
       const height = settings.height || video.videoHeight || 480;
       const publishFps = 2;
-      const response = await fetch(`${apiBase}/api/live/sessions/browser?width=${width}&height=${height}&fps=${publishFps}`, { method: 'POST' });
+      const response = await fetch(`${apiBase}/api/live/sessions/browser?width=${width}&height=${height}&fps=${publishFps}&overlay_profile=${overlayProfile}`, { method: 'POST' });
       if (!response.ok) throw new Error(await response.text());
       const browserSession = await response.json();
       setSession(browserSession);
@@ -280,26 +308,37 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans text-sm">
+    <div className="space-y-4 sm:space-y-8 max-w-7xl mx-auto font-sans text-xs sm:text-sm">
       {/* Top Controls */}
-      <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-neutral-200">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2.5 sm:gap-4 pb-4 border-b border-neutral-200">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <Button onClick={armBrowserWebcam} className="gap-2 rounded-xl"><Camera size={14} /> Arm Browser Webcam</Button>
           <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2 rounded-xl"><Upload size={14} /> Upload & Arm</Button>
           <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadVideo(e.target.files[0])} />
-          <input value={invigilatorId} onChange={(event) => setInvigilatorId(event.target.value)} aria-label="Invigilator ID" className="w-32 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono" placeholder="Invigilator ID" />
-          {(isArmed || isPaused) && <Button onClick={startMonitoring} disabled={monitoringBusy} className="gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800"><Play size={13} /> {monitoringBusy ? 'Starting…' : isPaused ? 'Invigilator Resume Monitoring' : 'Invigilator Start Monitoring'}</Button>}
-          {isMonitoring && <Button variant="destructive" onClick={stopSession} className="gap-2 rounded-xl"><Square size={13} /> Invigilator Stop Monitoring</Button>}
+          <input value={invigilatorId} onChange={(event) => setInvigilatorId(event.target.value)} aria-label="Invigilator ID" className="w-full sm:w-28 md:w-32 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono" placeholder="Invigilator ID" />
+          <label className="flex items-center gap-1.5 text-2xs text-neutral-600" title={overlayProfile === 'full_context' ? 'The established full-context renderer does not run the experimental Video-3 phone specialist.' : 'Video-3 trained; review evidence only, not a release model.'}>
+            <input type="checkbox" disabled={overlayProfile === 'full_context'} checked={experimentalPhoneEvidence} onChange={(event) => setExperimentalPhoneEvidence(event.target.checked)} />
+            Experimental phone evidence
+          </label>
+          <label className="flex items-center gap-1.5 text-2xs text-neutral-600" title="Full context uses the established pose, gaze-proxy, workstation, and temporal review renderer. Compact keeps the canonical product overlay.">
+            Overlay
+            <select value={overlayProfile} onChange={(event) => { const next = event.target.value as 'full_context' | 'product_operator'; setOverlayProfile(next); if (next === 'full_context') setExperimentalPhoneEvidence(false); }} className="rounded border border-neutral-200 bg-white px-1 py-0.5 text-2xs">
+              <option value="full_context">Full context</option>
+              <option value="product_operator">Compact product</option>
+            </select>
+          </label>
+          {(isArmed || isPaused) && <Button onClick={startMonitoring} disabled={monitoringBusy} className="gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800"><Play size={13} /> {monitoringBusy ? 'Starting…' : isPaused ? 'Resume Monitoring' : 'Start Monitoring'}</Button>}
+          {isMonitoring && <Button variant="destructive" onClick={stopSession} className="gap-2 rounded-xl"><Square size={13} /> Stop Monitoring</Button>}
           <input
-            className="w-64 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono"
-            placeholder="RTSP via MediaMTX: rtsp://127.0.0.1:8554/exam"
+            className="w-full sm:w-56 md:w-64 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-mono"
+            placeholder="RTSP: rtsp://127.0.0.1:8554/exam"
             onKeyDown={async (e) => {
               if (e.key !== 'Enter') return;
               const source = (e.currentTarget as HTMLInputElement).value;
               stopBrowserPublisher();
               setTelemetry(null); setShowSourcePreview(false); setFallbackActive(true); setLiveError('');
               try {
-                const response = await fetch(`${apiBase}/api/live/sessions/webcam?source=${encodeURIComponent(source)}`, { method: 'POST' });
+                const response = await fetch(`${apiBase}/api/live/sessions/webcam?source=${encodeURIComponent(source)}&experimental_phone_evidence=${experimentalPhoneEvidence}&overlay_profile=${overlayProfile}`, { method: 'POST' });
                 if (!response.ok) throw new Error(await response.text());
                 setSession(await response.json());
               } catch (error) { setLiveError(`${String(error)}; showing verified fallback.`); setFallbackActive(true); }
@@ -307,8 +346,8 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
           />
         </div>
         {/* Camera Selector */}
-        <div className="flex items-center gap-1.5 bg-white p-2 rounded-2xl border border-neutral-200 shadow-2xs">
-          <span className="text-neutral-400 text-xs font-bold px-3 uppercase tracking-wider">Feed:</span>
+        <div className="flex items-center gap-1.5 bg-white p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border border-neutral-200 shadow-2xs overflow-x-auto max-w-full scrollbar-none">
+          <span className="text-neutral-400 text-xs font-bold px-2 sm:px-3 uppercase tracking-wider shrink-0">Feed:</span>
           {cameras.map((cam) => {
             const isSelected = selectedCameraId === cam.id;
             return (
@@ -356,9 +395,9 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
       )}
 
       {/* Main Content Grid: Player + Telemetry Cards */}
-      <div className="grid grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-12 gap-4 lg:gap-8 items-start">
         {/* Main Video Viewport (8 Cols) */}
-        <div className="col-span-12 lg:col-span-8 space-y-6">
+        <div className="col-span-12 lg:col-span-8 space-y-4 sm:space-y-6">
           <CCTVVideoPlayer
             cameraName={selectedCam.name}
             resolution={selectedCam.resolution}
@@ -368,9 +407,9 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
             telemetry={telemetry}
             showSourcePreview={showSourcePreview}
             onTimeUpdate={handleTimeUpdate}
-            liveStreamUrl={isMonitoring && !fallbackActive ? `${apiBase}${session.stream_url}?clean=true` : undefined}
+            liveStreamUrl={isMonitoring && !fallbackActive ? `${apiBase}${session.stream_url}` : undefined}
             recordedVideoUrl={selectedSample && (fallbackActive || !session) ? `${apiBase}${showSourcePreview && selectedSample.source.preview_url ? selectedSample.source.preview_url : selectedSample.annotated_video_url}` : undefined}
-            liveStatus={isMonitoring && !fallbackActive ? (telemetry ? 'LIVE • FRAME-BY-FRAME' : 'INITIALIZING MODELS') : isArmed ? 'ARMED • INVIGILATOR START REQUIRED' : isPaused ? 'COMPUTATION PAUSED • FEED REMAINS ARMED' : monitoringState === 'STOPPED' ? 'MONITORING STOPPED • RE-ARM SOURCE TO START AGAIN' : selectedSample ? (showSourcePreview ? 'LIVE AI OVERLAY • INTERACTIVE HUD' : 'VERIFIED PREVIOUS RUN') : undefined}
+            liveStatus={isMonitoring && !fallbackActive ? (telemetry ? 'LIVE • SERVER EVIDENCE FEED' : 'INITIALIZING MODELS') : isArmed ? 'ARMED • INVIGILATOR START REQUIRED' : isPaused ? 'COMPUTATION PAUSED • FEED REMAINS ARMED' : monitoringState === 'STOPPED' ? 'MONITORING STOPPED • RE-ARM SOURCE TO START AGAIN' : selectedSample ? (showSourcePreview ? 'SOURCE VIDEO • UNANNOTATED' : 'VERIFIED ANNOTATED RUN') : undefined}
             onLiveStreamError={() => { setShowSourcePreview(false); setFallbackActive(true); setLiveError('Live video transport failed; verified output fallback activated.'); }}
           />
           {liveError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{liveError}</div>}
@@ -378,11 +417,7 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
 
         {/* Live Tracking HUD & Layer Widgets (4 Cols) */}
         <div className="col-span-12 lg:col-span-4 space-y-6">
-          {/* AI Layers Toggle Widget */}
-          <LayerControlWidget
-            layers={layers}
-            onToggleLayer={handleToggleLayer}
-          />
+          <LayerControlWidget layers={layers} onToggleLayer={handleToggleLayer} />
 
           {/* Active Terminal Telemetry Card */}
           <ParallaxCard tiltAngle={3} className="p-6 bg-white border border-neutral-200 rounded-3xl shadow-xs space-y-5">
@@ -412,6 +447,13 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
                   color="rose"
                   size="sm"
                 />
+                {(telemetry?.temporal_evidence?.phone_evidence || []).map((row: any) => (
+                  <div key={`${row.candidate_id}-${row.state}`} className="text-2xs text-neutral-600">
+                    Candidate {row.candidate_id}: {row.state === 'FRESH_PHONE_DETECTION'
+                      ? `fresh phone detection (${(row.last_fresh_confidence * 100).toFixed(0)}%)`
+                      : `recent-phone continuity only (${row.elapsed_since_fresh_sec.toFixed(1)}s since fresh evidence)`}
+                  </div>
+                ))}
               </div>
 
               <div className="space-y-1.5">
@@ -421,6 +463,7 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
                   color="amber"
                   size="sm"
                 />
+                {telemetry?.temporal_evidence && <p className="text-2xs text-neutral-500">Persistence and association only; not a behavioural verdict.</p>}
               </div>
             </div>
 
@@ -445,8 +488,8 @@ export const LiveMonitorView: React.FC<LiveMonitorViewProps> = ({
               <p className="mt-1 text-xs text-neutral-500">Integrity-validated annotated videos, measured metrics, JSONL logs, and captured evidence. These samples are also the automatic player fallback.</p>
             </div>
             <div className="flex items-center gap-2">
-              {selectedSample?.source?.preview_url && <Button size="sm" variant={showSourcePreview ? 'default' : 'outline'} onClick={() => { setShowSourcePreview(true); setFallbackActive(false); }}>Dynamic AI Layers (Clean)</Button>}
-              <Button size="sm" variant={!showSourcePreview ? 'default' : 'outline'} onClick={() => { setShowSourcePreview(false); setFallbackActive(true); }}>Pre-baked Video</Button>
+              {selectedSample?.source?.preview_url && <Button size="sm" variant={showSourcePreview ? 'default' : 'outline'} onClick={() => { setShowSourcePreview(true); setFallbackActive(false); }}>Source video (unannotated)</Button>}
+              <Button size="sm" variant={!showSourcePreview ? 'default' : 'outline'} onClick={() => { setShowSourcePreview(false); setFallbackActive(true); }}>Annotated evidence video</Button>
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-2xs font-bold text-emerald-700">REAL GPU OUTPUT</span>
             </div>
           </div>

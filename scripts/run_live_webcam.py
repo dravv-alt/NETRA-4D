@@ -198,7 +198,35 @@ class _EvidenceObservation:
         return self.keypoints.get(name)
 
 
-def render_evidence_review_frame(renderer, frame, people, detected, privacy, events, reasoner, *, frame_index, fps):
+LIVE_RENDER_LAYER_DEFAULTS = {
+    "personBoxes": True,
+    "trackingIds": True,
+    "poseSkeleton": True,
+    "objects": True,
+    "seatMapping": True,
+    "attentionRays": True,
+    "behaviorEvents": True,
+    "threeDVector": False,
+}
+
+
+def load_render_layers(path: Path | None, previous: dict[str, bool], previous_mtime_ns: int | None):
+    """Read an atomically-written UI preference file without interrupting inference."""
+    if path is None:
+        return previous, previous_mtime_ns
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+        if mtime_ns == previous_mtime_ns:
+            return previous, previous_mtime_ns
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        if set(parsed) != set(LIVE_RENDER_LAYER_DEFAULTS) or any(type(parsed[key]) is not bool for key in parsed):
+            return previous, previous_mtime_ns
+        return {key: parsed[key] for key in LIVE_RENDER_LAYER_DEFAULTS}, mtime_ns
+    except (OSError, ValueError, json.JSONDecodeError):
+        return previous, previous_mtime_ns
+
+
+def render_evidence_review_frame(renderer, frame, people, detected, privacy, events, reasoner, *, frame_index, fps, layers):
     """Single, semantic live renderer; no raw furniture/debug-layer stacking."""
     review_ids = {candidate_id for event in events for candidate_id in event.candidate_ids}
     privacy_by_id = {int(person.entity_local_id): annotation for person, annotation in zip(people, privacy)}
@@ -240,7 +268,7 @@ def render_evidence_review_frame(renderer, frame, people, detected, privacy, eve
     alerts = [event.label for event in events[:2]]
     return renderer.render_frame(
         frame, tracked_people, candidates, evidence_objects, set(), "LIVE REVIEW",
-        frame_index, 0, fps, alerts,
+        frame_index, 0, fps, alerts, layers=layers,
     )
 
 
@@ -306,6 +334,7 @@ def main() -> int:
     parser.add_argument("--preprocessing-config", default=None, help="Path to preprocessing YAML config")
     parser.add_argument("--live-publish-dir", type=Path, help="Atomically publish latest.jpg and latest.json for the API")
     parser.add_argument("--monitoring-control-file", type=Path, help="When absent, keep the live feed running but skip inference")
+    parser.add_argument("--render-layers-file", type=Path, help="Atomically-updated server-rendered live layer preferences")
     args = parser.parse_args()
 
     source = int(args.source) if args.source.isdigit() else args.source
@@ -336,7 +365,13 @@ def main() -> int:
     pose.start()
     objects.start()
     preprocessing = PreprocessingPipeline(config=args.preprocessing_config)
-    evidence_renderer = EvidenceRenderer(enable_face_blur=True, min_keypoint_conf=0.20)
+    # Privacy is applied by the canonical privacy module before rendering.  Do
+    # not apply EvidenceRenderer's older compact mask on top of it: that could
+    # expose parts of the face and make the live and recorded policies differ.
+    evidence_renderer = EvidenceRenderer(enable_face_blur=False, min_keypoint_conf=0.20)
+    render_layers = dict(LIVE_RENDER_LAYER_DEFAULTS)
+    render_layers_mtime_ns = None
+    render_layers_file = (ROOT / args.render_layers_file).resolve() if args.render_layers_file else None
     provenance = {
         "pose": model_record(pose_path),
         "object": model_record(object_path),
@@ -414,6 +449,9 @@ def main() -> int:
                 if isinstance(temporal, AutomaticCBTBehaviouralEngine)
                 else temporal if isinstance(temporal, CBTBehaviouralReasoner) else None
             )
+            render_layers, render_layers_mtime_ns = load_render_layers(
+                render_layers_file, render_layers, render_layers_mtime_ns,
+            )
             if args.render_profile == "context_debug":
                 annotated = draw_verified_overlay(masked, people, detected)
                 annotated = draw_post_blur_candidate_annotations(annotated, people, privacy)
@@ -422,8 +460,8 @@ def main() -> int:
                 annotated = draw_temporal_review_events(annotated, people, events)
             else:
                 annotated = render_evidence_review_frame(
-                    evidence_renderer, packet.frame, people, detected, privacy, events, active_cbt,
-                    frame_index=packet.index, fps=fps,
+                    evidence_renderer, masked, people, detected, privacy, events, active_cbt,
+                    frame_index=packet.index, fps=fps, layers=render_layers,
                 )
             if events and preprocessing.config.save_flagged_frames:
                 event_tags = "_".join(str(getattr(e, "event_type", "EVENT")) for e in events[:2])

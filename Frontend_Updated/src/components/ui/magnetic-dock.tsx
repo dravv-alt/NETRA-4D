@@ -52,7 +52,7 @@ function DockItem({ item, mouseX, iconSize, maxScale, magneticDistance }: DockIt
   };
 
   return (
-    <div className="relative flex flex-col items-center">
+    <div className="relative flex flex-col items-center shrink-0">
       {/* Tooltip on hover */}
       <AnimatePresence>
         {isHovered && (
@@ -61,7 +61,7 @@ function DockItem({ item, mouseX, iconSize, maxScale, magneticDistance }: DockIt
             animate={{ opacity: 1, y: -6, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.94 }}
             transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-            className="absolute bottom-full mb-1 px-3 py-1 bg-neutral-900 rounded-lg text-xs font-sans font-medium text-white whitespace-nowrap shadow-md pointer-events-none z-50"
+            className="hidden sm:block absolute bottom-full mb-1 px-3 py-1 bg-neutral-900 rounded-lg text-xs font-sans font-medium text-white whitespace-nowrap shadow-md pointer-events-none z-50"
           >
             {item.label}
           </motion.div>
