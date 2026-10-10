@@ -1,0 +1,25 @@
+{
+  "status": "COMPLETE",
+  "kind": "derived bounded CVAT export; raw XML untouched",
+  "frame_range_inclusive": [
+    0,
+    2199
+  ],
+  "frame_count": 2200,
+  "video": "C:\\Users\\bhavv\\OneDrive\\Desktop\\Dravvya(4th Sem)\\Hackathons\\NETRA-4D\\input\\videos\\VIDEO_03_mobile_phone_exam_hall_01_first_2200_frames.mp4",
+  "video_sha256": "7fba8bdda53c2524204822cbf630ff47a69123a2924e378644a471c6b8f9383b",
+  "video_metadata": {
+    "fps": 25.0,
+    "resolution": [
+      1280,
+      720
+    ]
+  },
+  "raw_annotation": "C:\\Users\\bhavv\\OneDrive\\Desktop\\Dravvya(4th Sem)\\Hackathons\\NETRA-4D\\MANUAL_ANNOTATIONS(CVAT)\\VIDEO_3_EXAM_HALL_PHONE_USE\\annotations.xml",
+  "raw_annotation_sha256": "301620001d90d0f2fb06deb3535e98dc67c6c641f7a10e84b5b01c2db1452382",
+  "derived_annotation": "annotations_0_2199.xml",
+  "derived_annotation_sha256": "157acc1e177fec9a3e0c9e9d7491b5390a0bc5786baa1769e02e28b915c34d1e",
+  "boxes_kept": 4712,
+  "boxes_removed_at_or_after_bound": 0,
+  "created_utc": "2026-10-03T13:06:16.868028+00:00"
+}
