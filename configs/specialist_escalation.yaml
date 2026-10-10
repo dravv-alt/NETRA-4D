@@ -1,0 +1,17 @@
+# Reproducible specialist scheduling policies. These select *when* an already
+# integrated specialist may execute; they do not alter detector thresholds.
+policies:
+  baseline_only:
+    mode: baseline_only
+  specialists_every_frame:
+    mode: specialists_every_frame
+    min_specialist_interval_frames: 1
+  conditional_escalation:
+    mode: conditional_escalation
+    trigger_threshold: 0.55
+    recovery_threshold: 0.35
+    min_consecutive_low_quality_frames: 3
+    specialist_window_frames: 12
+    cooldown_frames: 20
+    min_specialist_interval_frames: 2
+    min_recovery_frames: 3
