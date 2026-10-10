@@ -34,6 +34,8 @@ from drishti.pipeline.role_registry import ImmutableRoleRegistry, RoleEnum
 from drishti.pipeline.candidate_registry import ImmutableCandidateRegistry
 from drishti.pipeline.specialist_crop import SpecialistHandCropAnalyzer
 from drishti.pipeline.arbitrator import EvidenceArbitrator, FinalReviewState
+from drishti.preprocessing import PreprocessingPipeline
+from drishti.data.video_policy import bounded_video_source
 from utils import normalize_rgb, get_focalLength_from_fieldOfView
 from utils.camera import perspective_projection
 from model import Model
@@ -97,7 +99,8 @@ def run_situational_pipeline(
     output_dir,
     sample_every=2,
     max_frames=0,
-    prime_vram_gb=2.2
+    prime_vram_gb=2.2,
+    preprocessing_config=None
 ):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"[NETRA-4D Situational Pipeline] Running on Dedicated GPU: {device}")
@@ -106,7 +109,11 @@ def run_situational_pipeline(
     env_profiler = EnvironmentProfiler(warmup_frames=30)
     role_registry = ImmutableRoleRegistry(warmup_frames=45)
     candidate_registry = ImmutableCandidateRegistry()
-    specialist_crop = SpecialistHandCropAnalyzer(crop_size=256)
+    preprocessing_pipeline = PreprocessingPipeline(config=preprocessing_config)
+    specialist_crop = SpecialistHandCropAnalyzer(
+        crop_size=256,
+        crop_enhancer=preprocessing_pipeline.enhance_crop,
+    )
     arbitrator = EvidenceArbitrator()
 
     # Load YOLO26 Detectors
@@ -135,6 +142,7 @@ def run_situational_pipeline(
         active_scratch = torch.empty(int(prime_vram_gb * (1024**3) / 4), dtype=torch.float32, device=device)
 
     K = get_camera_parameters(img_size, fov=60, device=device)
+    video_source, _ = bounded_video_source(video_source)
     cap = cv2.VideoCapture(str(video_source))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -163,8 +171,11 @@ def run_situational_pipeline(
                         break
 
                     if frame_idx % sample_every == 0:
+                        # Deep Preprocessing: Assess quality and conditionally enhance low-quality frames
+                        enhanced_frame, quality_report = preprocessing_pipeline.process(frame, frame_idx=frame_idx)
+
                         # 1. YOLO26 Pose + ByteTrack
-                        pose_res = yolo_pose.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.25, device=device, verbose=False)[0]
+                        pose_res = yolo_pose.track(enhanced_frame, persist=True, tracker="bytetrack.yaml", conf=0.25, device=device, verbose=False)[0]
                         tracked_people = []
                         if pose_res.boxes is not None and len(pose_res.boxes) > 0:
                             boxes = pose_res.boxes.xyxy.cpu().numpy()
@@ -174,7 +185,7 @@ def run_situational_pipeline(
                                 tracked_people.append({"track_id": int(tid), "bbox": [float(v) for v in b], "keypoints": kp})
 
                         # 2. YOLO26 Object Detection
-                        obj_res = yolo_obj.predict(frame, conf=0.20, device=device, verbose=False)[0]
+                        obj_res = yolo_obj.predict(enhanced_frame, conf=0.20, device=device, verbose=False)[0]
                         detected_objects = []
                         if obj_res.boxes is not None and len(obj_res.boxes) > 0:
                             for ob, oconf, ocls in zip(obj_res.boxes.xyxy.cpu().numpy(), obj_res.boxes.conf.cpu().numpy(), obj_res.boxes.cls.int().cpu().numpy()):
@@ -341,9 +352,39 @@ def run_situational_pipeline(
                             elif arb.state == FinalReviewState.HIGH_PRIORITY_REVIEW:
                                 tag = f"ALERT: {cand_id} -> {desk_id} | {arb.event_type}"
                                 box_col = (0, 0, 255)
+                                if preprocessing_pipeline.config.save_flagged_frames:
+                                    preprocessing_pipeline.save_flagged_event_frame(
+                                        orig_bgr=frame,
+                                        enh_bgr=enhanced_frame,
+                                        frame_idx=frame_idx,
+                                        reason=f"ALERT_{cand_id}_{arb.event_type}",
+                                        metadata={
+                                            "candidate_id": cand_id,
+                                            "desk_id": desk_id,
+                                            "state": arb.state.value,
+                                            "event_type": arb.event_type,
+                                            "confidence": round(arb.confidence, 3),
+                                            "quality_score": quality_report.overall_score,
+                                        }
+                                    )
                             elif arb.state == FinalReviewState.REVIEW:
                                 tag = f"REVIEW: {cand_id} -> {desk_id}"
                                 box_col = (0, 165, 255)
+                                if preprocessing_pipeline.config.save_flagged_frames:
+                                    preprocessing_pipeline.save_flagged_event_frame(
+                                        orig_bgr=frame,
+                                        enh_bgr=enhanced_frame,
+                                        frame_idx=frame_idx,
+                                        reason=f"REVIEW_{cand_id}_{arb.event_type}",
+                                        metadata={
+                                            "candidate_id": cand_id,
+                                            "desk_id": desk_id,
+                                            "state": arb.state.value,
+                                            "event_type": arb.event_type,
+                                            "confidence": round(arb.confidence, 3),
+                                            "quality_score": quality_report.overall_score,
+                                        }
+                                    )
                             else:
                                 tag = f"{cand_id} -> {desk_id}"
                                 box_col = color
@@ -366,6 +407,7 @@ def run_situational_pipeline(
                             "frame_idx": frame_idx,
                             "timestamp_sec": round(frame_idx / fps, 3),
                             "environment": env_profiler.environment_type.value,
+                            "quality_report": quality_report.to_dict() if hasattr(quality_report, "to_dict") else None,
                             "arbitrated_events": [
                                 {
                                     "candidate_id": a.candidate_id,
@@ -404,9 +446,12 @@ def run_situational_pipeline(
             "environment_profile": env_profiler.get_summary(),
             "total_candidates_locked": len(candidate_registry.candidate_locks),
             "total_sampled_frames": len(results),
+            "preprocessing_stats": preprocessing_pipeline.get_stats_summary(),
             "video_path": str(out_video_path),
             "frames": results
         }, f, indent=2)
+
+    print(f"  -> Preprocessing Stats: {preprocessing_pipeline.get_stats_summary()}")
 
     print(f"  -> JSON:  {out_file}")
     return out_video_path, out_file
@@ -417,6 +462,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample-every", type=int, default=2)
     parser.add_argument("--max-frames", type=int, default=0, help="0 means entire video")
     parser.add_argument("--prime-vram-gb", type=float, default=2.2)
+    parser.add_argument("--preprocessing-config", default=None, help="Path to preprocessing YAML config")
     args = parser.parse_args()
 
     manifest = load_drive_manifest(ROOT / "drishti4d" / "configs" / "datasets.json")
@@ -433,5 +479,6 @@ if __name__ == "__main__":
             output_dir=out_dir,
             sample_every=args.sample_every,
             max_frames=args.max_frames,
-            prime_vram_gb=args.prime_vram_gb
+            prime_vram_gb=args.prime_vram_gb,
+            preprocessing_config=args.preprocessing_config
         )

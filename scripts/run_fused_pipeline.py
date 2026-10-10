@@ -26,6 +26,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "third_party" / "multi-hmr"))
 
 from drishti.data.google_drive import load_drive_manifest, materialize_drive_asset
+from drishti.preprocessing import PreprocessingPipeline
+from drishti.data.video_policy import bounded_video_source
 from utils import normalize_rgb, get_focalLength_from_fieldOfView
 from utils.camera import perspective_projection
 from model import Model
@@ -172,7 +174,8 @@ def run_fused_pipeline(
     model_name="multiHMR_672_S",
     sample_every=4, # Run at 6.25 fps for smooth motion
     max_frames=300, # Process up to 300 frames (~12-15 seconds of dense continuous video)
-    prime_vram_gb=2.5
+    prime_vram_gb=2.5,
+    preprocessing_config=None
 ):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"[NETRA-4D Fused Engine] Initializing on dedicated GPU: {device}")
@@ -236,6 +239,7 @@ def run_fused_pipeline(
 
     K = get_camera_parameters(img_size, fov=60, device=device)
 
+    video_source, _ = bounded_video_source(video_source)
     cap = cv2.VideoCapture(str(video_source))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -254,6 +258,7 @@ def run_fused_pipeline(
     frame_idx = 0
     sampled_count = 0
     start_time = time.time()
+    preprocessing_pipeline = PreprocessingPipeline(config=preprocessing_config)
 
     max_allowed = max_frames if (max_frames is not None and max_frames > 0) else float('inf')
 
@@ -265,11 +270,13 @@ def run_fused_pipeline(
                     break
 
                 if frame_idx % sample_every == 0:
+                    enhanced_frame, q_report = preprocessing_pipeline.process(frame, frame_idx=frame_idx)
+
                     # -------------------------------------------------------------
                     # A. YOLO26 Pose Inference + ByteTrack Tracking
                     # -------------------------------------------------------------
                     pose_results = yolo_pose.track(
-                        frame,
+                        enhanced_frame,
                         persist=True,
                         tracker="bytetrack.yaml",
                         conf=0.25,
@@ -302,7 +309,7 @@ def run_fused_pipeline(
                     # B. YOLO26 Object Detection (Phones, etc.)
                     # -------------------------------------------------------------
                     obj_results = yolo_obj.predict(
-                        frame,
+                        enhanced_frame,
                         conf=0.20,
                         device=device,
                         verbose=False
@@ -438,7 +445,8 @@ def run_fused_pipeline(
                             }
                             for item in associated_humans
                         ],
-                        "detected_objects": detected_objects
+                        "detected_objects": detected_objects,
+                        "quality_report": q_report.to_dict() if hasattr(q_report, "to_dict") else None,
                     }
                     results.append(frame_record)
                     sampled_count += 1
@@ -470,9 +478,12 @@ def run_fused_pipeline(
             "model_yolo_object": "yolo26n.pt",
             "tracker": "ByteTrack",
             "total_sampled_frames": len(results),
+            "preprocessing_stats": preprocessing_pipeline.get_stats_summary(),
             "video_path": str(out_video_path),
             "frames": results
         }, f, indent=2)
+
+    print(f"  -> Preprocessing Stats: {preprocessing_pipeline.get_stats_summary()}")
 
     print(f"  -> Unified JSON: {out_file}")
     return out_video_path, out_file
@@ -484,6 +495,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample-every", type=int, default=1)
     parser.add_argument("--max-frames", type=int, default=0, help="0 means entire video")
     parser.add_argument("--prime-vram-gb", type=float, default=2.2)
+    parser.add_argument("--preprocessing-config", default=None, help="Path to preprocessing YAML config")
     args = parser.parse_args()
 
     manifest = load_drive_manifest(ROOT / "drishti4d" / "configs" / "datasets.json")
@@ -501,5 +513,6 @@ if __name__ == "__main__":
             model_name=args.model_name,
             sample_every=args.sample_every,
             max_frames=args.max_frames,
-            prime_vram_gb=args.prime_vram_gb
+            prime_vram_gb=args.prime_vram_gb,
+            preprocessing_config=args.preprocessing_config
         )
