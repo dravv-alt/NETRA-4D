@@ -1,0 +1,13 @@
+schema_version: "1.0"
+models:
+  pose:
+    path: approved.pt
+    provider: ultralytics_pose
+    required_classes: [person]
+    release_approved: true
+  experimental:
+    path: blocked.pt
+    provider: ultralytics_detect
+    required_classes: [phone]
+    release_approved: false
+    purpose: needs held-out evaluation

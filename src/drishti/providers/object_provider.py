@@ -83,7 +83,12 @@ class ObjectDisambiguationProvider(PerceptionProvider):
         aliases: set[str] | None = None, inference_view: str = "full_frame",
     ) -> list[dict[str, Any]]:
         raw = []
-        for result in model.predict(image, conf=confidence, device=self.device, verbose=False):
+        kwargs = {"conf": confidence, "verbose": False}
+        # See YOLO26PoseProvider: explicit device="cpu" is unsafe with the
+        # supported Windows runtime. CUDA requests remain explicit.
+        if self.device.startswith("cuda"):
+            kwargs["device"] = self.device
+        for result in model.predict(image, **kwargs):
             if result.boxes is None:
                 continue
             for box, score, class_id in zip(
@@ -186,7 +191,7 @@ class ObjectDisambiguationProvider(PerceptionProvider):
                     raw_predictions.extend(self._predict_raw(
                         self.chit_model, crop, self.chit_confidence,
                         offset_x=cx1, offset_y=cy1,
-                        aliases={"chit", "paper chit", "cheat sheet", "piece of paper", "note paper"},
+                        aliases={"chit", "chit-paper", "paper chit", "cheat sheet", "piece of paper", "note paper"},
                         inference_view=f"candidate_crop:{person.entity_local_id}",
                     ))
 

@@ -58,6 +58,18 @@ def test_phone_event_requires_association_and_persistence():
     assert events[0].is_new is True
 
 
+def test_custom_phone_class_reaches_review_events_with_original_provenance():
+    engine = BaselineTemporalEngine(phone_confidence=.25)
+    candidate = person(7,(.1,.1,.4,.9))
+    phone = detected('phone',.8,(.2,.5,.25,.6),associated=7)
+    phone.metadata.update({'model_weight':'phone_candidate.pt','inference_view':'person_context_crop'})
+    assert engine.update(0,[candidate],[phone],[privacy('FORWARD')]) == []
+    events = engine.update(.31,[candidate],[phone],[privacy('FORWARD')])
+    assert events[0].event_type == 'PHONE_USE_REVIEW'
+    assert events[0].details['checkpoint'] == 'phone_candidate.pt'
+    assert events[0].details['raw_model_class'] == 'phone'
+
+
 def test_low_hand_is_explicitly_a_proxy_not_chit_detection():
     engine = BaselineTemporalEngine(hand_low_duration_sec=0.5)
     candidate = person(2, (0.1, 0.1, 0.4, 0.9), low_hand=True)

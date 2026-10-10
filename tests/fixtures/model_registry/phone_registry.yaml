@@ -1,0 +1,18 @@
+schema_version: '1.0'
+models:
+  pose:
+    path: approved.pt
+    provider: ultralytics_pose
+    required_classes: [person]
+    release_approved: true
+  objects:
+    path: approved.pt
+    provider: ultralytics_detect
+    required_classes: [person]
+    release_approved: true
+  phone_candidate:
+    path: approved.pt
+    provider: ultralytics_detect
+    required_classes: [phone]
+    release_approved: false
+    purpose: pending independent validation

@@ -1,0 +1,46 @@
+schema_version: "1.0"
+# Only roles marked release_approved may be enabled by the product runner.
+# A checkpoint is not approved merely because a .pt file exists.
+models:
+  pose:
+    path: models/weights/yolo26n-pose.pt
+    provider: ultralytics_pose
+    required_classes: [person]
+    release_approved: true
+    purpose: person boxes, COCO keypoints, and tracking only
+  objects:
+    path: models/weights/yolo26n.pt
+    provider: ultralytics_detect
+    required_classes: [person, cell phone, laptop]
+    release_approved: true
+    purpose: raw COCO object evidence only
+  chit:
+    path: models/weights/yolo26m_chit.pt
+    provider: ultralytics_detect
+    required_classes: [chit-paper]
+    release_approved: false
+    purpose: experimental paper/chit proposal; requires held-out evaluation before release
+  phone_specialist:
+    path: models/weights/yolo26m_phone.pt
+    provider: ultralytics_detect
+    required_classes: [phone]
+    release_approved: false
+    purpose: experimental; blocked until class-map and held-out evaluation are recorded
+  phone_cvat_video03_bootstrap:
+    path: outputs/training/video03_phone_bootstrap_20261002_v2/fit/weights/last.pt
+    provider: ultralytics_detect
+    required_classes: [phone]
+    release_approved: false
+    purpose: phone-only positive-crop bootstrap; same-session training-fit evidence only; requires independent validation
+  phone_cvat_video03_100epochs:
+    path: outputs/training/video03_phone_continued_100epochs_20261002/fit/weights/last.pt
+    provider: ultralytics_detect
+    required_classes: [phone]
+    release_approved: false
+    purpose: 100 cumulative epochs on Video 3 positive crops; experimental phone evidence with mode-specific evaluation; requires independent validation
+  cheating_posture:
+    path: models/weights/yolo26m_cheating.pt
+    provider: ultralytics_detect
+    required_classes: [students_cheating, students_not_cheating]
+    release_approved: false
+    purpose: blocked; a posture class is not a misconduct verdict

@@ -6,7 +6,7 @@ small notes, or phone manipulation that full-frame models miss due to image down
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -27,8 +27,13 @@ class SpecialistHandCropAnalyzer:
     dual-wrist convergence or under-desk retrieval is proposed.
     """
 
-    def __init__(self, crop_size: int = 128):
+    def __init__(
+        self,
+        crop_size: int = 128,
+        crop_enhancer: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    ):
         self.crop_size = crop_size
+        self.crop_enhancer = crop_enhancer
 
     def extract_wrist_crops(
         self,
@@ -76,6 +81,9 @@ class SpecialistHandCropAnalyzer:
         - Rectangular sharp contour gradient strictly inside hand grasp zone.
         - Zero false positives on surrounding desks or neighbor candidates.
         """
+        if self.crop_enhancer is not None and crop_bgr is not None and crop_bgr.size > 0:
+            crop_bgr = self.crop_enhancer(crop_bgr)
+
         gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
         h, w = crop_bgr.shape[:2]
         cx_local, cy_local = w // 2, h // 2

@@ -113,7 +113,8 @@ class BaselineTemporalEngine:
     def _phone_proposals(self, objects: list[Any]) -> list[_Proposal]:
         proposals = []
         for detected in objects:
-            if detected.metadata.get("raw_model_class") != "cell phone":
+            raw_class = detected.metadata.get('raw_model_class')
+            if raw_class not in {'cell phone','phone'}:
                 continue
             if detected.confidence < self.phone_confidence or detected.associated_entity_id is None:
                 continue
@@ -125,11 +126,14 @@ class BaselineTemporalEngine:
                 evidence_kind="MODEL_PLUS_GEOMETRY",
                 score=float(min(detected.confidence, max(detected.association_confidence, 0.25))),
                 minimum_duration_sec=0.30,
-                source_signals=("YOLO cell phone", "phone-person/wrist association", "temporal persistence"),
+                source_signals=(f"YOLO {raw_class}", "phone-person/wrist association", "temporal persistence"),
                 details={
                     "object_confidence": float(detected.confidence),
                     "association_confidence": float(detected.association_confidence),
                     "association_method": detected.metadata.get("association_method"),
+                    "raw_model_class": raw_class,
+                    "checkpoint": detected.metadata.get('model_weight'),
+                    "inference_view": detected.metadata.get('inference_view'),
                 },
             ))
         return proposals
