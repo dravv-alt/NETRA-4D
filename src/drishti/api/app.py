@@ -474,6 +474,19 @@ LIVE_ROOT = FINAL_OUTPUTS / "live_sessions"
 UPLOAD_ROOT = LIVE_ROOT / "uploads"
 live_processes: dict[str, subprocess.Popen] = {}
 
+# Overlay selection is deliberately independent of inference.  ``full_context``
+# reuses the established CBT live renderer; ``product_operator`` retains the
+# canonical product path.  Existing sessions without this key remain product
+# sessions for backward compatibility.
+LIVE_OVERLAY_PROFILES = frozenset({"product_operator", "full_context"})
+
+
+def _live_runner_for(metadata: dict[str, Any]) -> str:
+    """Resolve a session profile without replacing the product path."""
+    if metadata.get("source_kind") == "BROWSER_WEBCAM" or metadata.get("overlay_profile") == "full_context":
+        return "run_live_webcam.py"
+    return "run_product_pipeline.py"
+
 
 def _write_session_metadata(publish_dir: Path, metadata: dict[str, Any]) -> None:
     (publish_dir / "session.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -492,7 +505,15 @@ def _record_monitoring_action(publish_dir: Path, action: str, operator: str) -> 
 def _arm_live_session(
     source: str, source_kind: str, browser_settings: dict[str, float] | None = None,
     experimental_phone_evidence: bool = False,
+    overlay_profile: str = "product_operator",
 ) -> dict[str, Any]:
+    if overlay_profile not in LIVE_OVERLAY_PROFILES:
+        raise HTTPException(status_code=422, detail=f"Unknown overlay profile: {overlay_profile}")
+    if overlay_profile == "full_context" and experimental_phone_evidence:
+        raise HTTPException(
+            status_code=422,
+            detail="Experimental phone evidence is available only in the product_operator profile.",
+        )
     session_id = f"live_{uuid4().hex[:12]}"
     publish_dir = LIVE_ROOT / session_id
     publish_dir.mkdir(parents=True, exist_ok=False)
@@ -504,6 +525,7 @@ def _arm_live_session(
         "processor_log": str((publish_dir / "processor.log").relative_to(BASE_DIR)),
         "control_log_url": f"/api/live/sessions/{session_id}/controls",
         "experimental_phone_evidence": bool(experimental_phone_evidence),
+        "overlay_profile": overlay_profile,
     }
     if browser_settings is not None:
         browser_input = publish_dir / "browser_input"
@@ -539,7 +561,7 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
     if current_status != "ARMED":
         raise HTTPException(status_code=409, detail=f"Session is {current_status}; arm a new source before starting")
     source = str(metadata["source"])
-    runner = "run_live_webcam.py" if metadata["source_kind"] == "BROWSER_WEBCAM" else "run_product_pipeline.py"
+    runner = _live_runner_for(metadata)
     command = [
         sys.executable, str(BASE_DIR / "scripts" / runner),
         "--source", source, "--camera-id", session_id, "--device", "auto",
@@ -555,7 +577,7 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
             "--browser-height", str(int(browser_settings["height"])),
             "--browser-fps", str(float(browser_settings["fps"])),
         ])
-    if metadata.get("experimental_phone_evidence"):
+    if metadata.get("experimental_phone_evidence") and runner == "run_product_pipeline.py":
         command.extend([
             "--phone-role", "phone_cvat_video03_100epochs",
             "--allow-experimental-models",
@@ -596,12 +618,14 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
 def start_webcam(
     source: str = Query("0", description="Webcam index or rtsp:// MediaMTX URL"),
     experimental_phone_evidence: bool = Query(False, description="Use the unapproved Video 3 phone specialist as review evidence"),
+    overlay_profile: str = Query("product_operator", description="product_operator or full_context"),
 ):
     if not (source.isdigit() or source.lower().startswith("rtsp://")):
         raise HTTPException(status_code=400, detail="Source must be a webcam index or RTSP URL")
     return _arm_live_session(
         source, "RTSP" if source.lower().startswith("rtsp://") else "WEBCAM",
         experimental_phone_evidence=experimental_phone_evidence,
+        overlay_profile=overlay_profile,
     )
 
 
@@ -610,10 +634,11 @@ def start_browser_webcam(
     width: int = Query(640, ge=160, le=3840),
     height: int = Query(480, ge=120, le=2160),
     fps: float = Query(5.0, ge=1.0, le=15.0),
+    overlay_profile: str = Query("full_context", description="product_operator or full_context"),
 ):
     return _arm_live_session("browser:getUserMedia", "BROWSER_WEBCAM", {
         "width": float(width), "height": float(height), "fps": float(fps),
-    })
+    }, overlay_profile=overlay_profile)
 
 
 @app.post("/api/live/sessions/{session_id}/browser-frame", status_code=202)
