@@ -1,6 +1,6 @@
 """The only supported NETRA batch/live inference entry point.
 
-It runs approved registry models, produces privacy-safe video and raw JSONL,
+It runs approved registry models, produces operator-review video and raw JSONL,
 persists human-review events, and writes a release manifest.  It intentionally
 does not output cheating verdicts or synthetic performance metrics.
 """
@@ -26,6 +26,7 @@ from drishti.event_repository import EventRepository
 from drishti.data.video_policy import bounded_video_source
 from drishti.events import EvidenceKind, EventLifecycle, EventRecord
 from drishti.privacy import draw_post_blur_candidate_annotations
+from drishti.render.operator_overlay import draw_operator_overlay
 from drishti.release import CanonicalInferenceService, ModelRegistry
 from drishti.temporal import draw_temporal_review_events
 from scripts.run_verified_inference import draw_verified_overlay
@@ -87,6 +88,8 @@ def main() -> int:
     parser.add_argument('--phone-roi-hold-seconds',type=float,default=1.,help='Detector person crop retention, seconds; never retains phone detections')
     parser.add_argument('--enable-preprocessing', action='store_true', help='Apply configured adaptive enhancement to inference only; evidence rendering remains raw')
     parser.add_argument('--preprocessing-config', default=None, help='Optional adaptive-preprocessing YAML configuration')
+    parser.add_argument('--overlay-style', choices=('operator', 'debug'), default='operator', help='Operator is compact review evidence; debug draws all raw model primitives.')
+    parser.add_argument('--privacy-mask', action='store_true', help='Apply face masking to the rendered output. Off by default for local operator review.')
     args = parser.parse_args()
     args.source, args.max_frames = bounded_video_source(args.source, args.max_frames, args.video_id)
     if args.cpu_threads <= 0:
@@ -114,7 +117,7 @@ def main() -> int:
     writer = cv2.VideoWriter(str(run_dir / "annotated.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
     if not writer.isOpened():
         raise RuntimeError("Unable to create annotated.mp4")
-    service = CanonicalInferenceService(registry, device=device, tracker=None if args.tracker == "none" else args.tracker, confidence=args.confidence, phone_review_confidence=args.phone_review_confidence,phone_role=args.phone_role,allow_experimental_models=args.allow_experimental_models,phone_roi_hold_seconds=args.phone_roi_hold_seconds,enable_preprocessing=args.enable_preprocessing,preprocessing_config=args.preprocessing_config)
+    service = CanonicalInferenceService(registry, device=device, tracker=None if args.tracker == "none" else args.tracker, confidence=args.confidence, phone_review_confidence=args.phone_review_confidence,phone_role=args.phone_role,allow_experimental_models=args.allow_experimental_models,phone_roi_hold_seconds=args.phone_roi_hold_seconds,enable_preprocessing=args.enable_preprocessing,preprocessing_config=args.preprocessing_config,enable_privacy_mask=args.privacy_mask)
     repository = EventRepository((ROOT / args.database).resolve())
     counters = {"frames": 0, "people": 0, "objects": 0, "events": 0, "new_events": 0}
     publish_dir = (ROOT / args.live_publish_dir).resolve() if args.live_publish_dir else None
@@ -137,9 +140,12 @@ def main() -> int:
                     continue
                 frame_started = perf_counter()
                 result = service.process(index, index / fps, frame, camera_id=args.camera_id, video_id=video_id)
-                rendered = draw_verified_overlay(result.privacy_frame, result.people, result.objects)
-                rendered = draw_post_blur_candidate_annotations(rendered, result.people, result.privacy_annotations)
-                rendered = draw_temporal_review_events(rendered, result.people, result.review_events)
+                if args.overlay_style == 'debug':
+                    rendered = draw_verified_overlay(result.privacy_frame, result.people, result.objects)
+                    rendered = draw_post_blur_candidate_annotations(rendered, result.people, result.privacy_annotations)
+                    rendered = draw_temporal_review_events(rendered, result.people, result.review_events)
+                else:
+                    rendered = draw_operator_overlay(result.privacy_frame, result.people, result.objects, result.review_events)
                 writer.write(rendered)
                 detections.write(json.dumps({"frame_index": index, "timestamp_sec": index / fps, "people": [row.model_dump(mode="json") for row in result.people], "objects": [row.model_dump(mode="json") for row in result.objects], "model_provenance": result.model_provenance, "quality_report": result.quality_report}, separators=(",", ":")) + "\n")
                 for event in result.review_events:
@@ -173,6 +179,7 @@ def main() -> int:
     manifest['phone_roi_hold_seconds'] = args.phone_roi_hold_seconds if args.phone_role else 0.
     manifest['phone_retention_policy'] = 'Only detector crop proposals retained; each phone box requires fresh inference'
     manifest['preprocessing'] = service.preprocessing_summary()
+    manifest['rendering'] = {'overlay_style': args.overlay_style, 'privacy_mask_enabled': args.privacy_mask}
     (run_dir / ("COMPLETE.json" if manifest["status"] == "COMPLETE" else "INCOMPLETE.json")).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2))
     return 0 if completed else 1

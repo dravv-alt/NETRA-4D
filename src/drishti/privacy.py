@@ -328,8 +328,12 @@ def build_adaptive_face_mask(height: int, width: int, people: list[Any], min_con
 # Public: full pipeline
 # ---------------------------------------------------------------------------
 
-def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> tuple[np.ndarray, list[PrivacyAnnotation]]:
-    """Compute gaze first, blur face boundary second (preserving eyes and neck), return records for final overlay."""
+def collect_candidate_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> list[PrivacyAnnotation]:
+    """Collect internal geometric annotations without changing the image.
+
+    These records are still required by the temporal engine even when a local
+    operator deliberately chooses an unmasked review feed.
+    """
 
     height, width = frame.shape[:2]
     annotations: list[PrivacyAnnotation] = []
@@ -356,6 +360,14 @@ def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[A
             gaze_proxy_confidence=gaze_confidence,
         ))
 
+    return annotations
+
+
+def apply_privacy_mask_and_collect_annotations(frame: np.ndarray, people: list[Any], *, min_keypoint_confidence: float = 0.25) -> tuple[np.ndarray, list[PrivacyAnnotation]]:
+    """Compute annotations, then apply the opt-in privacy mask to a copy."""
+
+    height, width = frame.shape[:2]
+    annotations = collect_candidate_annotations(frame, people, min_keypoint_confidence=min_keypoint_confidence)
     mask = build_adaptive_face_mask(height, width, people, min_confidence=min_keypoint_confidence)
 
     if np.any(mask > 0):

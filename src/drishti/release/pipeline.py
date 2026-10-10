@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ..privacy import apply_privacy_mask_and_collect_annotations
+from ..privacy import apply_privacy_mask_and_collect_annotations, collect_candidate_annotations
 from ..providers.object_provider import ObjectDisambiguationProvider
 from ..providers.yolo26_provider import YOLO26PoseProvider
 from ..providers.phone_review_provider import PhoneReviewProvider
@@ -38,6 +38,7 @@ class CanonicalInferenceService:
         phone_role: str | None = None, allow_experimental_models: bool = False,
         phone_roi_hold_seconds: float = 1.,
         enable_preprocessing: bool = False, preprocessing_config: str | None = None,
+        enable_privacy_mask: bool = False,
     ):
         self.registry = registry
         self.pose_record = registry.get("pose")
@@ -55,6 +56,7 @@ class CanonicalInferenceService:
             PreprocessingPipeline(config=preprocessing_config)
             if enable_preprocessing else None
         )
+        self.enable_privacy_mask = enable_privacy_mask
         self._provenance = registry.provenance(("pose", "objects"))
         if self.chit_record:
             self._provenance["chit"] = self.chit_record.provenance()
@@ -104,7 +106,13 @@ class CanonicalInferenceService:
                     continue
                 retained.append(obj)
             objects = retained
-        privacy_frame, annotations = apply_privacy_mask_and_collect_annotations(frame_bgr, people)
+        if self.enable_privacy_mask:
+            privacy_frame, annotations = apply_privacy_mask_and_collect_annotations(frame_bgr, people)
+        else:
+            # Local review mode: retain a readable frame while preserving the
+            # same geometric inputs used by temporal evidence processing.
+            privacy_frame = frame_bgr.copy()
+            annotations = collect_candidate_annotations(frame_bgr, people)
         events = self.temporal.update(timestamp_sec, people, objects, annotations)
         return FrameInference(
             people, objects, privacy_frame, annotations, events, self._provenance,
