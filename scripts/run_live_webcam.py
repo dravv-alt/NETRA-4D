@@ -29,6 +29,7 @@ from drishti.event_repository import EventRepository
 from drishti.cbt import AutomaticCBTBehaviouralEngine, CBTBehaviouralReasoner, draw_cbt_context, load_scene_map
 from drishti.events import EvidenceKind, EventLifecycle, EventRecord, SpecialistStatus
 from drishti.privacy import apply_privacy_mask_and_collect_annotations, draw_post_blur_candidate_annotations
+from drishti.preprocessing import PreprocessingPipeline
 from drishti.providers.object_provider import ObjectDisambiguationProvider
 from drishti.providers.yolo26_provider import YOLO26PoseProvider
 from drishti.temporal import BaselineTemporalEngine, draw_temporal_review_events
@@ -242,6 +243,7 @@ def main() -> int:
     parser.add_argument("--post-roll-sec", type=float, default=3.0)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/live_runs"))
     parser.add_argument("--database", type=Path, default=Path("outputs/netra4d_events.sqlite"))
+    parser.add_argument("--preprocessing-config", default=None, help="Path to preprocessing YAML config")
     parser.add_argument("--live-publish-dir", type=Path, help="Atomically publish latest.jpg and latest.json for the API")
     parser.add_argument("--monitoring-control-file", type=Path, help="When absent, keep the live feed running but skip inference")
     args = parser.parse_args()
@@ -273,6 +275,7 @@ def main() -> int:
     )
     pose.start()
     objects.start()
+    preprocessing = PreprocessingPipeline(config=args.preprocessing_config)
     provenance = {
         "pose": model_record(pose_path),
         "object": model_record(object_path),
@@ -340,8 +343,9 @@ def main() -> int:
             # Preserve exact media timestamps for uploaded files. Live sources use wall time.
             timestamp = packet.index / fps if lossless_file_source else monotonic() - started
             last_timestamp = timestamp
-            people, _ = pose.process_frame(packet.index, timestamp, packet.frame, args.camera_id, run_id)
-            _, detected = objects.process_frame(packet.index, timestamp, packet.frame, args.camera_id, run_id, people)
+            enhanced_frame, q_report = preprocessing.process(packet.frame, packet.index)
+            people, _ = pose.process_frame(packet.index, timestamp, enhanced_frame, args.camera_id, run_id)
+            _, detected = objects.process_frame(packet.index, timestamp, enhanced_frame, args.camera_id, run_id, people)
             masked, privacy = apply_privacy_mask_and_collect_annotations(packet.frame, people)
             events = temporal.update(timestamp, people, detected, privacy)
             annotated = draw_verified_overlay(masked, people, detected)
@@ -354,6 +358,16 @@ def main() -> int:
             if active_cbt:
                 annotated = draw_cbt_context(annotated, active_cbt, timestamp_sec=timestamp)
             annotated = draw_temporal_review_events(annotated, people, events)
+            if events and preprocessing.config.save_flagged_frames:
+                event_tags = "_".join(str(getattr(e, "event_type", "EVENT")) for e in events[:2])
+                clean_tag = "".join(c if c.isalnum() or c == "_" else "_" for c in event_tags)[:40]
+                preprocessing.save_flagged_event_frame(
+                    orig_bgr=packet.frame,
+                    enh_bgr=enhanced_frame,
+                    frame_idx=packet.index,
+                    reason=f"LIVE_{clean_tag}",
+                    metadata={"timestamp": timestamp, "event_count": len(events), "quality_score": q_report.overall_score}
+                )
             if args.record_stream and stream_writer is None:
                 height, width = annotated.shape[:2]
                 try:
@@ -470,6 +484,7 @@ def main() -> int:
         "latency_ms_p95": float(np.percentile(latencies, 95)) if latencies else 0,
         "queue_capacity": 2,
         "stale_frame_policy": "lossless_backpressure" if lossless_file_source else "drop_oldest",
+        "preprocessing_stats": preprocessing.get_stats_summary(),
         "annotated_stream_path": str(stream_path.relative_to(ROOT)) if stream_path.is_file() else None,
         "reasoning_engine": type(temporal).__name__,
         "workstation_map": str(scene_path.relative_to(ROOT)) if scene_path else None,

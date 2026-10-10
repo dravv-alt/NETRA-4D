@@ -1,0 +1,56 @@
+# Controlled Video 3 inference comparison profile.
+# Preserve the five-stage adaptive policy but select the supported low-latency
+# bilateral denoiser. Fast NL-Means measured 4.63 s on the first 1280x720
+# frame on this Windows host and is not viable for an all-frame comparison.
+enabled: true
+mode: "adaptive"
+
+denoise:
+  enabled: true
+  method: "bilateral"
+  bilateral_d: 7
+  bilateral_sigma_color: 50.0
+  bilateral_sigma_space: 50.0
+  trigger_noise_threshold: 12.0
+
+clahe:
+  enabled: true
+  clip_limit: 2.0
+  tile_grid_size: [8, 8]
+  trigger_contrast_threshold: 40.0
+
+gamma:
+  enabled: true
+  target_brightness: 125.0
+  min_gamma: 0.5
+  max_gamma: 2.2
+  low_brightness_threshold: 75.0
+  high_brightness_threshold: 185.0
+
+sharpen:
+  enabled: true
+  amount: 1.0
+  radius: 1.0
+  threshold: 3
+  trigger_blur_threshold: 110.0
+
+white_balance:
+  enabled: true
+  method: "gray_world"
+  p_norm: 6
+  trigger_cast_threshold: 14.0
+
+quality_gate:
+  enabled: true
+  bypass_threshold: 0.85
+  min_brightness: 30.0
+  max_brightness: 220.0
+  min_contrast: 15.0
+  min_focus_score: 60.0
+  downsample_assessment: true
+  assessment_max_dim: 320
+
+save_enhanced_frames: false
+save_flagged_frames: false
+save_high_motion_frames: false
+log_quality_reports: false

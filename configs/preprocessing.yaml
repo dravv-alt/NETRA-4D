@@ -1,0 +1,85 @@
+# NETRA-4D Deep Image Preprocessing Configuration
+# Adaptive 5-stage enhancement pipeline for low-quality CCTV video streams.
+# Enhances frames before passing to YOLO Pose and Object Detection.
+
+# Master pipeline switch
+enabled: true
+
+# Mode:
+#   adaptive: only applies stages when frame quality metrics warrant it (recommended)
+#   always: applies all enabled stages unconditionally
+#   disabled: bypasses all preprocessing
+mode: "adaptive"
+
+# Stage 1: Noise Reduction
+denoise:
+  enabled: true
+  # Method: "fast_nl_means" (highest accuracy, recommended on RTX 3050) or "bilateral"
+  method: "fast_nl_means"
+  bilateral_d: 7
+  bilateral_sigma_color: 50.0
+  bilateral_sigma_space: 50.0
+  # NL-Means parameters (used when method: "fast_nl_means")
+  nlmeans_h: 7.0
+  nlmeans_h_color: 7.0
+  nlmeans_template_window: 7
+  nlmeans_search_window: 21
+  # Noise threshold (Laplacian standard deviation / noise estimate) to trigger Stage 1
+  trigger_noise_threshold: 12.0
+
+# Stage 2: Contrast Enhancement (CLAHE)
+clahe:
+  enabled: true
+  clip_limit: 2.0
+  tile_grid_size: [8, 8]
+  # RMS contrast threshold below which CLAHE triggers
+  trigger_contrast_threshold: 40.0
+
+# Stage 3: Adaptive Gamma Correction
+gamma:
+  enabled: true
+  target_brightness: 125.0
+  min_gamma: 0.5
+  max_gamma: 2.2
+  # Luminance thresholds
+  low_brightness_threshold: 75.0    # Brighten if mean luminance < 75
+  high_brightness_threshold: 185.0  # Darken if mean luminance > 185
+
+# Stage 4: Detail Sharpening (Unsharp Masking)
+sharpen:
+  enabled: true
+  amount: 1.0
+  radius: 1.0
+  threshold: 3
+  # Tenengrad/Laplacian focus score below which sharpening triggers
+  trigger_blur_threshold: 110.0
+
+# Stage 5: Color Cast Neutralization (White Balance)
+white_balance:
+  enabled: true
+  # Method: "gray_world", "shades_of_gray", "white_patch"
+  method: "gray_world"
+  p_norm: 6
+  # Color cast threshold in LAB chroma space (||a - 128, b - 128||)
+  trigger_cast_threshold: 14.0
+
+# Quality Assessment Gate & Fast Bypass
+quality_gate:
+  enabled: true
+  # If overall composite quality score >= bypass_threshold, skip enhancement (0 latency)
+  bypass_threshold: 0.85
+  min_brightness: 30.0
+  max_brightness: 220.0
+  min_contrast: 15.0
+  min_focus_score: 60.0
+  # Downsample frame for assessment (keeps quality check < 0.5ms)
+  downsample_assessment: true
+  assessment_max_dim: 320
+
+# Diagnostics & Logging
+save_enhanced_frames: false
+save_flagged_frames: true
+save_high_motion_frames: true
+motion_threshold: 25.0
+flagged_frames_dir: "artifacts/flagged_evidence"
+log_quality_reports: false
