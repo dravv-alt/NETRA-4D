@@ -70,6 +70,21 @@ def test_custom_phone_class_reaches_review_events_with_original_provenance():
     assert events[0].details['raw_model_class'] == 'phone'
 
 
+def test_recent_phone_evidence_is_explicitly_not_a_fresh_detection():
+    engine = BaselineTemporalEngine(phone_confidence=.25, phone_visibility_hold_sec=1.0)
+    candidate = person(7, (.1, .1, .4, .9))
+    phone = detected('phone', .8, (.2, .5, .25, .6), associated=7)
+    engine.update(0.0, [candidate], [phone], [privacy("FORWARD")])
+    fresh = engine.temporal_evidence(0.0)["phone_evidence"]
+    assert fresh[0]["state"] == "FRESH_PHONE_DETECTION"
+    engine.update(.5, [candidate], [], [privacy("FORWARD")])
+    bridged = engine.temporal_evidence(.5)["phone_evidence"]
+    assert bridged[0]["state"] == "TEMPORALLY_SUPPORTED_PHONE_CANDIDATE"
+    assert "not a fresh phone detection" in bridged[0]["semantics"]
+    engine.update(1.1, [candidate], [], [privacy("FORWARD")])
+    assert engine.temporal_evidence(1.1)["phone_evidence"] == []
+
+
 def test_low_hand_is_explicitly_a_proxy_not_chit_detection():
     engine = BaselineTemporalEngine(hand_low_duration_sec=0.5)
     candidate = person(2, (0.1, 0.1, 0.4, 0.9), low_hand=True)

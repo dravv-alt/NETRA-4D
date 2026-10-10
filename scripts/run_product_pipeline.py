@@ -135,6 +135,7 @@ def main() -> int:
                 if control_file is not None and not control_file.is_file():
                     counters["frames"] += 1
                     continue
+                frame_started = perf_counter()
                 result = service.process(index, index / fps, frame, camera_id=args.camera_id, video_id=video_id)
                 rendered = draw_verified_overlay(result.privacy_frame, result.people, result.objects)
                 rendered = draw_post_blur_candidate_annotations(rendered, result.people, result.privacy_annotations)
@@ -157,9 +158,12 @@ def main() -> int:
                     publish_atomic(publish_dir / "latest.jpg", encoded.tobytes())
                     publish_atomic(publish_dir / "latest.json", json.dumps({
                         "run_id": run_id, "frame_index": index, "timestamp_sec": index / fps,
+                        "latency_ms": (perf_counter() - frame_started) * 1000.0,
+                        "effective_fps": (counters["frames"] + 1) / max(perf_counter() - started, 0.001),
                         "people": [item.model_dump(mode="json") for item in result.people],
                         "objects": [item.model_dump(mode="json") for item in result.objects],
                         "active_review_events": [item.to_dict() for item in result.review_events],
+                        "temporal_evidence": result.temporal_evidence,
                         "model_provenance": result.model_provenance,
                     }).encode("utf-8"))
     finally:

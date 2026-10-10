@@ -489,7 +489,10 @@ def _record_monitoring_action(publish_dir: Path, action: str, operator: str) -> 
         output.write(json.dumps(record) + "\n")
 
 
-def _arm_live_session(source: str, source_kind: str, browser_settings: dict[str, float] | None = None) -> dict[str, Any]:
+def _arm_live_session(
+    source: str, source_kind: str, browser_settings: dict[str, float] | None = None,
+    experimental_phone_evidence: bool = False,
+) -> dict[str, Any]:
     session_id = f"live_{uuid4().hex[:12]}"
     publish_dir = LIVE_ROOT / session_id
     publish_dir.mkdir(parents=True, exist_ok=False)
@@ -500,6 +503,7 @@ def _arm_live_session(source: str, source_kind: str, browser_settings: dict[str,
         "telemetry_url": f"/ws/live/{session_id}",
         "processor_log": str((publish_dir / "processor.log").relative_to(BASE_DIR)),
         "control_log_url": f"/api/live/sessions/{session_id}/controls",
+        "experimental_phone_evidence": bool(experimental_phone_evidence),
     }
     if browser_settings is not None:
         browser_input = publish_dir / "browser_input"
@@ -551,6 +555,11 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
             "--browser-height", str(int(browser_settings["height"])),
             "--browser-fps", str(float(browser_settings["fps"])),
         ])
+    if metadata.get("experimental_phone_evidence"):
+        command.extend([
+            "--phone-role", "phone_cvat_video03_100epochs",
+            "--allow-experimental-models",
+        ])
     is_continuous_source = metadata["source_kind"] in {"BROWSER_WEBCAM", "WEBCAM", "RTSP"}
     # Continuous browser/RTSP sessions publish the latest annotated frame only.
     # Avoid writing a second full video while the operator is monitoring live.
@@ -584,10 +593,16 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
 
 
 @app.post("/api/live/sessions/webcam")
-def start_webcam(source: str = Query("0", description="Webcam index or rtsp:// MediaMTX URL")):
+def start_webcam(
+    source: str = Query("0", description="Webcam index or rtsp:// MediaMTX URL"),
+    experimental_phone_evidence: bool = Query(False, description="Use the unapproved Video 3 phone specialist as review evidence"),
+):
     if not (source.isdigit() or source.lower().startswith("rtsp://")):
         raise HTTPException(status_code=400, detail="Source must be a webcam index or RTSP URL")
-    return _arm_live_session(source, "RTSP" if source.lower().startswith("rtsp://") else "WEBCAM")
+    return _arm_live_session(
+        source, "RTSP" if source.lower().startswith("rtsp://") else "WEBCAM",
+        experimental_phone_evidence=experimental_phone_evidence,
+    )
 
 
 @app.post("/api/live/sessions/browser")

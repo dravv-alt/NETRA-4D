@@ -25,6 +25,7 @@ class FrameInference:
     review_events: list[ReviewEvent]
     model_provenance: dict[str, Any]
     quality_report: dict[str, Any] | None = None
+    temporal_evidence: dict[str, Any] | None = None
 
 
 class CanonicalInferenceService:
@@ -105,4 +106,7 @@ class CanonicalInferenceService:
             objects = retained
         privacy_frame, annotations = apply_privacy_mask_and_collect_annotations(frame_bgr, people)
         events = self.temporal.update(timestamp_sec, people, objects, annotations)
-        return FrameInference(people, objects, privacy_frame, annotations, events, self._provenance, quality_report)
+        return FrameInference(
+            people, objects, privacy_frame, annotations, events, self._provenance,
+            quality_report, self.temporal.temporal_evidence(timestamp_sec),
+        )

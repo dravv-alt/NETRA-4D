@@ -92,6 +92,7 @@ class BaselineTemporalEngine:
         interaction_max_distance: float = 0.42,
         screen_max_distance: float = 0.55,
         gaze_min_confidence: float = 0.35,
+        phone_visibility_hold_sec: float = 1.20,
     ) -> None:
         self.phone_confidence = phone_confidence
         self.maximum_gap_sec = maximum_gap_sec
@@ -101,7 +102,9 @@ class BaselineTemporalEngine:
         self.interaction_max_distance = interaction_max_distance
         self.screen_max_distance = screen_max_distance
         self.gaze_min_confidence = gaze_min_confidence
+        self.phone_visibility_hold_sec = phone_visibility_hold_sec
         self._states: dict[tuple[str, tuple[int, ...], str], _EventState] = {}
+        self._phone_evidence: dict[int, dict[str, Any]] = {}
 
     @staticmethod
     def _gaze_by_candidate(people: list[Any], privacy_annotations: list[Any]) -> dict[int, tuple[str, float]]:
@@ -137,6 +140,71 @@ class BaselineTemporalEngine:
                 },
             ))
         return proposals
+
+    def _update_phone_evidence(self, timestamp_sec: float, people: list[Any], objects: list[Any]) -> None:
+        """Maintain a short, explicit occlusion bridge for review telemetry.
+
+        A bridge is never inserted into ``objects`` and never becomes a fresh
+        detection.  It only says that a currently tracked person was recently
+        associated with a measured phone box that is now unavailable.
+        """
+        people_by_id = {int(person.entity_local_id): person for person in people}
+        fresh: dict[int, Any] = {}
+        for detected in objects:
+            if detected.metadata.get("raw_model_class") not in {"cell phone", "phone"}:
+                continue
+            if detected.confidence < self.phone_confidence or detected.associated_entity_id is None:
+                continue
+            candidate_id = int(detected.associated_entity_id)
+            if candidate_id not in people_by_id:
+                continue
+            previous = fresh.get(candidate_id)
+            if previous is None or detected.confidence > previous.confidence:
+                fresh[candidate_id] = detected
+
+        for candidate_id, detected in fresh.items():
+            self._phone_evidence[candidate_id] = {
+                "state": "FRESH_PHONE_DETECTION",
+                "last_fresh_timestamp_sec": float(timestamp_sec),
+                "last_fresh_confidence": float(detected.confidence),
+                "last_fresh_bbox_xyxy_norm": list(detected.bbox_xyxy_norm),
+                "raw_model_class": detected.metadata.get("raw_model_class"),
+                "checkpoint": detected.metadata.get("model_weight"),
+                "inference_view": detected.metadata.get("inference_view"),
+            }
+
+        for candidate_id in list(self._phone_evidence):
+            if candidate_id not in people_by_id:
+                del self._phone_evidence[candidate_id]
+                continue
+            row = self._phone_evidence[candidate_id]
+            elapsed = max(0.0, float(timestamp_sec) - float(row["last_fresh_timestamp_sec"]))
+            if candidate_id in fresh:
+                row["state"] = "FRESH_PHONE_DETECTION"
+                row["elapsed_since_fresh_sec"] = 0.0
+            elif elapsed <= self.phone_visibility_hold_sec:
+                row["state"] = "TEMPORALLY_SUPPORTED_PHONE_CANDIDATE"
+                row["elapsed_since_fresh_sec"] = elapsed
+            else:
+                del self._phone_evidence[candidate_id]
+
+    def temporal_evidence(self, timestamp_sec: float) -> dict[str, Any]:
+        """Return auditable evidence state for UI/telemetry, never a verdict."""
+        rows = []
+        for candidate_id, row in sorted(self._phone_evidence.items()):
+            payload = {"candidate_id": candidate_id, **row}
+            payload["semantics"] = (
+                "current-frame model detection" if row["state"] == "FRESH_PHONE_DETECTION"
+                else "recent tracked-person continuity only; not a fresh phone detection"
+            )
+            rows.append(payload)
+        return {
+            "schema_version": "1.0",
+            "timestamp_sec": float(timestamp_sec),
+            "phone_visibility_hold_sec": self.phone_visibility_hold_sec,
+            "phone_evidence": rows,
+            "semantics": "review evidence only; no phone-use or behavioural verdict",
+        }
 
     @staticmethod
     def _chit_proposals(objects: list[Any]) -> list[_Proposal]:
@@ -269,6 +337,7 @@ class BaselineTemporalEngine:
         objects: list[Any],
         privacy_annotations: list[Any],
     ) -> list[ReviewEvent]:
+        self._update_phone_evidence(timestamp_sec, people, objects)
         gaze = self._gaze_by_candidate(people, privacy_annotations)
         proposals = (
             self._phone_proposals(objects)
