@@ -96,6 +96,24 @@ def test_head_orientation_scale_invariance_and_gaze():
     assert feat_right.head.angular_velocity > 0.0
 
 
+def test_head_direction_diagnostic_is_deterministic_and_complete():
+    captured = []
+    extractor = BiomechanicalFeatureExtractor(head_diagnostic_sink=captured.append)
+    observation = VisionObservation(timestamp_sec=1.0, frame_idx=10, track_id=7,
+        bbox_xyxy_norm=(.2,.2,.5,.8), detection_confidence=.95, keypoints={
+            "left_eye": NormalizedKeypoint("left_eye", .30,.30, confidence=.9),
+            "right_eye": NormalizedKeypoint("right_eye", .40,.30, confidence=.9),
+            "nose": NormalizedKeypoint("nose", .42,.35, confidence=.9)})
+    first = extractor.extract("Candidate_07", observation).head.direction.value
+    assert len(captured) == 1
+    record = captured[0]
+    assert record["final_selected_direction"] == first == "RIGHT"
+    assert record["track_id"] == 7 and record["observation_frame_index"] == 10
+    assert record["raw_keypoints_normalized"]["left_eye"]["x"] == .30
+    assert record["eye_span_x"] == pytest.approx(.10)
+    assert record["thresholds"]["precedence"] == ["RIGHT", "LEFT", "DOWN", "UP", "FORWARD"]
+
+
 def test_dual_hand_convergence_and_lap_excursion():
     extractor = BiomechanicalFeatureExtractor()
 

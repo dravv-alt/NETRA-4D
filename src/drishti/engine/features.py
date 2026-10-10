@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from .observation import NormalizedKeypoint, VisionObservation, HandLandmarksObservation
@@ -92,9 +92,10 @@ class CandidateBiomechanicalFeatures:
 class BiomechanicalFeatureExtractor:
     """Extracts scale-invariant biomechanical features for candidates."""
 
-    def __init__(self, smoothing_tau: float = 0.12):
+    def __init__(self, smoothing_tau: float = 0.12, head_diagnostic_sink: Optional[Callable[[Dict[str, Any]], None]] = None):
         self.smoother = KeypointSmoother(time_constant_sec=smoothing_tau)
         self.head_yaw_ema: dict[str, TimeWeightedEMA] = {}
+        self.head_diagnostic_sink = head_diagnostic_sink
 
     def extract(
         self,
@@ -131,6 +132,7 @@ class BiomechanicalFeatureExtractor:
         right_eye = obs.get_keypoint("right_eye")
 
         if not nose or not left_eye or not right_eye:
+            self._emit_head_diagnostic(cand_id, obs, status="MISSING_REQUIRED_KEYPOINT", final_direction=GazeDirection.UNKNOWN)
             return HeadFeatures(
                 yaw_proxy=0.0,
                 pitch_proxy=0.0,
@@ -148,6 +150,8 @@ class BiomechanicalFeatureExtractor:
         # Anatomical eye span
         eye_span_x = abs(srx - slx)
         if eye_span_x < 1e-4:
+            self._emit_head_diagnostic(cand_id, obs, status="DEGENERATE_EYE_SPAN", final_direction=GazeDirection.UNKNOWN,
+                smoothed={"nose":[snx,sny],"left_eye":[slx,sly],"right_eye":[srx,sry]}, eye_span_x=eye_span_x)
             return HeadFeatures(0.0, 0.0, GazeDirection.UNKNOWN, 0.0, 0.0, False)
 
         eye_mid_x = (slx + srx) / 2.0
@@ -177,6 +181,12 @@ class BiomechanicalFeatureExtractor:
 
         conf = min(nose.confidence, left_eye.confidence, right_eye.confidence)
 
+        self._emit_head_diagnostic(cand_id, obs, status="OK", final_direction=direction,
+            smoothed={"nose":[snx,sny],"left_eye":[slx,sly],"right_eye":[srx,sry]}, eye_span_x=eye_span_x,
+            eye_mid=[eye_mid_x,eye_mid_y], nose_displacement=[snx-eye_mid_x,sny-eye_mid_y],
+            raw_yaw=raw_yaw, raw_pitch=raw_pitch, smoothed_yaw=yaw_sig.smoothed_value,
+            yaw_velocity=yaw_sig.velocity, face_confidence=conf)
+
         return HeadFeatures(
             yaw_proxy=yaw_sig.smoothed_value,
             pitch_proxy=raw_pitch,
@@ -185,6 +195,32 @@ class BiomechanicalFeatureExtractor:
             confidence=conf,
             is_valid=True
         )
+
+    def _emit_head_diagnostic(self, cand_id: str, obs: VisionObservation, *, status: str,
+                              final_direction: GazeDirection, smoothed: Optional[Dict[str, List[float]]] = None,
+                              eye_span_x: Optional[float] = None, eye_mid: Optional[List[float]] = None,
+                              nose_displacement: Optional[List[float]] = None, raw_yaw: Optional[float] = None,
+                              raw_pitch: Optional[float] = None, smoothed_yaw: Optional[float] = None,
+                              yaw_velocity: Optional[float] = None, face_confidence: Optional[float] = None) -> None:
+        if self.head_diagnostic_sink is None:
+            return
+        relevant = ("nose", "left_eye", "right_eye", "left_ear", "right_ear", "left_shoulder", "right_shoulder")
+        raw = {name: ({"x": p.x, "y": p.y, "confidence": p.confidence} if (p := obs.get_keypoint(name)) else None) for name in relevant}
+        scores = None if raw_yaw is None or raw_pitch is None else {
+            "RIGHT_margin": smoothed_yaw - 0.40, "LEFT_margin": -0.40 - smoothed_yaw,
+            "DOWN_margin_when_yaw_in_front_band": raw_pitch - 0.85,
+            "UP_margin_when_yaw_in_front_band": -0.40 - raw_pitch,
+            "FRONT_band": abs(smoothed_yaw) <= 0.40 and -0.40 <= raw_pitch <= 0.85,
+        }
+        self.head_diagnostic_sink({"schema_version":"1.0","observation_frame_index":obs.frame_idx,
+            "timestamp_sec":obs.timestamp_sec,"track_id":obs.track_id,"candidate_id":cand_id,"status":status,
+            "raw_keypoints_normalized":raw,"smoothed_keypoints_normalized":smoothed,"eye_mid_normalized":eye_mid,
+            "eye_span_x":eye_span_x,"nose_displacement_normalized":nose_displacement,"raw_yaw_proxy":raw_yaw,
+            "raw_pitch_proxy":raw_pitch,"yaw_like_smoothed":smoothed_yaw,"pitch_like":raw_pitch,
+            "yaw_velocity":yaw_velocity,"face_keypoint_min_confidence":face_confidence,
+            "thresholds":{"right_gt":0.40,"left_lt":-0.40,"down_gt":0.85,"up_lt":-0.40,"precedence":["RIGHT","LEFT","DOWN","UP","FORWARD"]},
+            "candidate_class_threshold_margins":scores,"final_selected_direction":final_direction.value,
+            "smoothing":{"facial_keypoint_ema_tau_sec":self.smoother.time_constant_sec,"yaw_ema_tau_sec":0.15}})
 
     def _extract_torso_features(self, obs: VisionObservation) -> TorsoFeatures:
         ls = obs.get_keypoint("left_shoulder")
