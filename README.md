@@ -4,6 +4,18 @@ Privacy-aware examination-video evidence pipeline built around real computer-vis
 
 The repository deliberately distinguishes **measured outputs** from planned or experimental capabilities. It does not create simulated boxes, synthetic SMPL-X joints, seeded incidents, fabricated benchmark scores, or inferred malpractice verdicts.
 
+## Product release path
+
+Use [`scripts/run_product_pipeline.py`](scripts/run_product_pipeline.py) for
+all new local-video, webcam, and RTSP product runs. It is the single supported
+pipeline: registry-approved perception models -> privacy-safe evidence ->
+review events -> SQLite/API-compatible records -> manifest. Validate the model
+class maps first with `python scripts/validate_models.py`. The historical
+unified, fused, and situational runners are experimental and are not release
+paths. See [RELEASE_WORKFLOW.md](docs/RELEASE_WORKFLOW.md) for the held-out
+evaluation contract; it intentionally reports no accuracy metric before human
+labels exist.
+
 ## What runs today
 
 - Official Ultralytics `yolo26n-pose.pt`: person boxes and 17 COCO keypoints.
@@ -55,8 +67,11 @@ models/weights/                       official YOLO weights (ignored by Git)
 models_smplx_v1_1.zip                 supplied SMPL-X archive (870 MB)
 src/drishti/providers/                real YOLO providers
 src/drishti/privacy.py                privacy/gaze-proxy layer
-scripts/render_annotated_videos.py    full per-frame video renderer
-scripts/run_live_webcam.py            bounded real-time inference and evidence runner
+scripts/run_product_pipeline.py       supported batch/live product inference path
+scripts/validate_models.py            model file/class-map release gate
+scripts/evaluate_review_events.py     held-out human-review metric report
+scripts/render_annotated_videos.py    historical five-Drive-video renderer
+scripts/run_live_webcam.py            browser-capture compatibility adapter
 scripts/review_events.py              human-only event review workflow
 scripts/analyze_reviewed_events.py    reviewed threshold calibration report
 scripts/label_chit_examples.py        human YOLO chit annotation over Drive videos
@@ -326,3 +341,16 @@ events. Labels explicitly distinguish phone model evidence from low-hand,
 candidate-interaction, and other-screen behavioral proxies.
 
 Read [PIPELINE_AND_WORKING_STATUS.md](docs/PIPELINE_AND_WORKING_STATUS.md) for file hashes, known limitations, previous Kaggle publication status, and the experimental DigitalNegatives Watcher merge.
+
+## Video 3 unified review experiment
+
+The bounded Video 3 profile uses shared registry inference and NETRA's candidate,
+zone, temporal and state-machine components. Its trained phone model is explicitly
+experimental, not release-approved. Run inference plus CVAT recall evaluation with:
+
+```powershell
+python scripts/run_unified_pipeline.py --asset VIDEO_03 --profile video03-review --allow-experimental-models --evaluate-cvat
+```
+
+See [VIDEO03_UNIFIED_REVIEW.md](docs/VIDEO03_UNIFIED_REVIEW.md) for the actual model
+selection, disabled branches, outputs, and evaluation limitations.
