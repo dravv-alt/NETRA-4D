@@ -60,24 +60,25 @@ class YOLO26PoseProvider(PerceptionProvider):
             self.start()
 
         height, width = frame_bgr.shape[:2]
+        kwargs = {
+            "conf": self.conf_thresh,
+            "iou": self.iou_thresh,
+            "verbose": False,
+        }
+        # Passing device="cpu" to the installed Windows Ultralytics/Torch
+        # combination can yield saturated 1.0 confidence border boxes. Let
+        # Ultralytics select its CPU backend; CUDA remains explicit.
+        if self.device.startswith("cuda"):
+            kwargs["device"] = self.device
         if self.tracker:
             results = self.model.track(
                 frame_bgr,
                 persist=True,
                 tracker=self.tracker,
-                conf=self.conf_thresh,
-                iou=self.iou_thresh,
-                device=self.device,
-                verbose=False,
+                **kwargs,
             )
         else:
-            results = self.model.predict(
-                frame_bgr,
-                conf=self.conf_thresh,
-                iou=self.iou_thresh,
-                device=self.device,
-                verbose=False,
-            )
+            results = self.model.predict(frame_bgr, **kwargs)
 
         observations: List[PersonObservation] = []
         for result in results:
