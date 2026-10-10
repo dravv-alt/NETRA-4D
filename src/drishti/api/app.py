@@ -535,12 +535,12 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
     if current_status != "ARMED":
         raise HTTPException(status_code=409, detail=f"Session is {current_status}; arm a new source before starting")
     source = str(metadata["source"])
+    runner = "run_live_webcam.py" if metadata["source_kind"] == "BROWSER_WEBCAM" else "run_product_pipeline.py"
     command = [
-        sys.executable, str(BASE_DIR / "scripts" / "run_live_webcam.py"),
+        sys.executable, str(BASE_DIR / "scripts" / runner),
         "--source", source, "--camera-id", session_id, "--device", "auto",
         "--live-publish-dir", str(publish_dir.relative_to(BASE_DIR)),
         "--output-dir", str((FINAL_OUTPUTS / "live_runs").relative_to(BASE_DIR)),
-        "--auto-calibration-warmup", "1.0",
     ]
     browser_settings = metadata.get("browser_settings")
     if browser_settings is not None:
@@ -554,7 +554,7 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
     is_continuous_source = metadata["source_kind"] in {"BROWSER_WEBCAM", "WEBCAM", "RTSP"}
     # Continuous browser/RTSP sessions publish the latest annotated frame only.
     # Avoid writing a second full video while the operator is monitoring live.
-    if not is_continuous_source:
+    if not is_continuous_source and runner == "run_live_webcam.py":
         command.append("--record-stream")
     if is_continuous_source:
         control_file = publish_dir / "monitoring.enabled"
