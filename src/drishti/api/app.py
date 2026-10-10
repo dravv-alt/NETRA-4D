@@ -618,7 +618,7 @@ def _launch_live_process(session_id: str, operator: str) -> dict[str, Any]:
 def start_webcam(
     source: str = Query("0", description="Webcam index or rtsp:// MediaMTX URL"),
     experimental_phone_evidence: bool = Query(False, description="Use the unapproved Video 3 phone specialist as review evidence"),
-    overlay_profile: str = Query("product_operator", description="product_operator or full_context"),
+    overlay_profile: str = Query("full_context", description="full_context (default) or product_operator"),
 ):
     if not (source.isdigit() or source.lower().startswith("rtsp://")):
         raise HTTPException(status_code=400, detail="Source must be a webcam index or RTSP URL")
