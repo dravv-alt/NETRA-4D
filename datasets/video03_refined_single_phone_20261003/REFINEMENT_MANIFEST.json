@@ -1,0 +1,29 @@
+{
+  "status": "READY_FOR_REFINED_EVALUATION",
+  "raw_xml_sha256": "301620001d90d0f2fb06deb3535e98dc67c6c641f7a10e84b5b01c2db1452382",
+  "base_xml_sha256": "157acc1e177fec9a3e0c9e9d7491b5390a0bc5786baa1769e02e28b915c34d1e",
+  "refined_xml_sha256": "405659a9a0fe9f5ca412abc715d92fe1e5c56956b60c1b3de20ac693697318c6",
+  "single_physical_phone": true,
+  "visible_phone_boxes": 1290,
+  "human_confirmed_proposals": 792,
+  "merged_duplicate_proposals": [
+    {
+      "frame_index": 1518,
+      "kept_proposal_id": "proposal_e25f88befb0f568be2f15f87",
+      "discarded_duplicate_ids": [
+        "proposal_a603b20955930a0afbeaa870"
+      ],
+      "reason": "one physical phone confirmed by reviewer"
+    },
+    {
+      "frame_index": 1519,
+      "kept_proposal_id": "proposal_9bcef74b028ece1e4139f927",
+      "discarded_duplicate_ids": [
+        "proposal_f3abed18091676d126714d2e"
+      ],
+      "reason": "one physical phone confirmed by reviewer"
+    }
+  ],
+  "ambiguous_excluded": 39,
+  "not_phone_excluded": 18
+}
