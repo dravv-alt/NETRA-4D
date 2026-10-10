@@ -21,6 +21,9 @@
     },
     {
       "asset_id": "VIDEO_03",
+      "local_path": "input/videos/VIDEO_03_mobile_phone_exam_hall_01_first_2200_frames.mp4",
+      "max_frames": 2200,
+      "processing_note": "Canonical VIDEO_03 is 2200 frames (0-2199); original Drive source retained for provenance only",
       "drive_file_id": "1MFD3E5hu-Jj3H1cPBSMqOaFE7W1mJB7y",
       "source_url": "https://drive.google.com/file/d/1MFD3E5hu-Jj3H1cPBSMqOaFE7W1mJB7y/view?usp=sharing",
       "filename": "01.Candidate was found using a mobile phone in the examination hall..mkv",

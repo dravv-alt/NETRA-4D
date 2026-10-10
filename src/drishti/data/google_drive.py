@@ -31,6 +31,8 @@ class DriveAsset:
     filename: str
     expected_bytes: int | None = None
     source_label: str | None = None
+    local_path: Path | None = None
+    max_frames: int | None = None
 
 
 def extract_drive_file_id(value: str) -> str:
@@ -60,6 +62,8 @@ def load_drive_manifest(path: str | Path) -> List[DriveAsset]:
                 filename=str(raw["filename"]),
                 expected_bytes=int(raw["expected_bytes"]) if raw.get("expected_bytes") else None,
                 source_label=raw.get("source_label"),
+                local_path=(Path(__file__).resolve().parents[3] / raw['local_path']).resolve() if raw.get('local_path') else None,
+                max_frames=int(raw['max_frames']) if raw.get('max_frames') else None,
             )
         )
     return result
@@ -74,6 +78,20 @@ def materialize_drive_asset(
     temp_root: str | Path | None = None,
 ) -> Iterator[Tuple[Path, Dict[str, Any]]]:
     """Stage one Drive video in a temporary directory and report provenance."""
+
+    if asset.local_path is not None:
+        if not asset.local_path.is_file():
+            raise FileNotFoundError(f"Canonical bounded input missing: {asset.local_path}; refusing original-source fallback")
+        provenance = {
+            'asset_id': asset.asset_id, 'source_url': asset.source_url,
+            'drive_file_id': asset.drive_file_id, 'filename': asset.local_path.name,
+            'bytes': asset.local_path.stat().st_size,
+            'sha256': sha256(asset.local_path.read_bytes()).hexdigest(),
+            'staging': 'canonical_bounded_local_input', 'persisted_in_repository': True,
+            'max_frames': asset.max_frames,
+        }
+        yield asset.local_path, provenance
+        return
 
     download_url = (
         "https://drive.google.com/uc?export=download&id=" + asset.drive_file_id
