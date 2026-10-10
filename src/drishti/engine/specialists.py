@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+import ctypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,6 +43,66 @@ except ImportError:
 
 from .observation import HandLandmarksObservation, NormalizedKeypoint, RTMPoseAdapter
 
+_ONNX_DLL_DIRECTORY_HANDLES = []
+_ONNX_PRELOADED_CUDA_DLLS = []
+_ONNX_CUDA_DLLS_REGISTERED = False
+
+
+def _register_onnx_cuda_dll_directories() -> None:
+    """Expose pip-installed CUDA/cuDNN DLLs to ONNX Runtime on Windows.
+
+    NVIDIA's pip runtime packages intentionally keep their DLLs beneath the
+    Python package tree instead of modifying machine PATH.  This is a process-
+    local lookup change only; it does not alter model behaviour or system PATH.
+    """
+    global _ONNX_CUDA_DLLS_REGISTERED
+    if _ONNX_CUDA_DLLS_REGISTERED or os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+    for base in sys.path:
+        root = Path(base) / "nvidia"
+        # ONNX Runtime's CUDA provider imports cuDNN, cuBLAS, CUDA Runtime and
+        # cuFFT directly.  cuFFT in turn may require NVJitLink.  The NVIDIA
+        # wheels place those DLLs outside the normal Windows DLL search path.
+        for package in (
+            "cudnn",
+            "cublas",
+            "cuda_nvrtc",
+            "cuda_runtime",
+            "cufft",
+            "nvjitlink",
+        ):
+            dll_dir = root / package / "bin"
+            if dll_dir.is_dir():
+                try:
+                    _ONNX_DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(dll_dir)))
+                except OSError:
+                    pass
+        # On some Windows hosts, ONNX Runtime's provider bridge does not
+        # resolve transitive dependencies from AddDllDirectory alone. Preload
+        # the NVIDIA-wheel DLLs in their dependency order and retain the
+        # module handles for the life of this process.
+        for package in (
+            "cuda_runtime",
+            "nvjitlink",
+            "cuda_nvrtc",
+            "cublas",
+            "cufft",
+            "cudnn",
+        ):
+            dll_dir = root / package / "bin"
+            if not dll_dir.is_dir():
+                continue
+            for dll in sorted(dll_dir.glob("*.dll")):
+                try:
+                    _ONNX_PRELOADED_CUDA_DLLS.append(ctypes.WinDLL(str(dll)))
+                except OSError:
+                    # The provider creation below remains authoritative.
+                    continue
+    # Re-loading this native DLL chain for every RTMPose session can fault on
+    # Windows. The handles above are process-lifetime globals, so one preload
+    # is sufficient for all subsequent specialist instances.
+    _ONNX_CUDA_DLLS_REGISTERED = True
+
 
 class RTMPoseONNXRunner:
     """Stage 2 Specialist: Executes RTM-Pose ONNX with SimCC coordinate classification."""
@@ -54,9 +115,14 @@ class RTMPoseONNXRunner:
         self.simcc_split_ratio = 2.0
 
         if ort is not None and os.path.exists(onnx_path):
+            _register_onnx_cuda_dll_directories()
             opts = ort.SessionOptions()
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            self.session = ort.InferenceSession(onnx_path, sess_options=opts, providers=["CPUExecutionProvider"])
+            # Prefer CUDA when the installed ONNX Runtime actually exposes it;
+            # retain an explicit CPU fallback for reproducible degraded runs.
+            available = ort.get_available_providers()
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if "CUDAExecutionProvider" in available else ["CPUExecutionProvider"]
+            self.session = ort.InferenceSession(onnx_path, sess_options=opts, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
 
     @property
