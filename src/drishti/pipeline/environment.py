@@ -45,6 +45,7 @@ class EnvironmentProfiler:
         )
         self.monitor_detections_history.append(num_monitors)
         self.person_detections_history.append(len(people))
+        self.frame_count += 1
 
         if self.frame_count >= self.warmup_frames:
             self.finalize()

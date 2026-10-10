@@ -81,7 +81,7 @@ class CompetingHypothesisEngine:
     def evaluate(
         self,
         candidate_id: str,
-        pattern: AggregatedTemporalPattern,
+        pattern: Optional[AggregatedTemporalPattern],
         is_board_aligned: bool = False,
         is_invigilator_nearby: bool = False,
         is_normal_device_interaction: bool = False,
@@ -95,14 +95,14 @@ class CompetingHypothesisEngine:
         counter: List[str] = []
 
         # 1. Base weights from temporal pattern
-        if pattern.pattern_type == TemporalPatternType.BRIEF_ROUTINE:
+        if pattern is not None and pattern.pattern_type == TemporalPatternType.BRIEF_ROUTINE:
             dist.p_h4 += 1.5  # Brief movements overwhelmingly favor natural ergonomics
             counter.append(f"Brief movement ({pattern.duration_sec:.2f}s) indicates routine physiological adjustment")
-        elif pattern.pattern_type == TemporalPatternType.SUSTAINED_HOLD:
+        elif pattern is not None and pattern.pattern_type == TemporalPatternType.SUSTAINED_HOLD:
             dist.p_h1 += 1.8
             dist.p_h4 -= 0.3
             supporting.append(f"Sustained unbroken hold ({pattern.duration_sec:.2f}s) in {pattern.event_type.value}")
-        elif pattern.pattern_type in (TemporalPatternType.REPEATED_EPISODE, TemporalPatternType.REPEATED_AND_SUSTAINED):
+        elif pattern is not None and pattern.pattern_type in (TemporalPatternType.REPEATED_EPISODE, TemporalPatternType.REPEATED_AND_SUSTAINED):
             dist.p_h1 += 2.2
             dist.p_h4 -= 0.5
             supporting.append(f"Recurrent episodes ({pattern.recurrence_count_in_window}x in sliding window)")

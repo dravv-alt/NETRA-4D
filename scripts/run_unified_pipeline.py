@@ -40,9 +40,11 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "third_party" / "multi-hmr"))
 
 from drishti.data.google_drive import load_drive_manifest, materialize_drive_asset
+from drishti.data.video_policy import bounded_video_source
 from drishti.render.evidence_renderer import EvidenceRenderer
 from drishti.privacy import apply_privacy_mask_and_collect_annotations
 from drishti.pipeline.environment import EnvironmentProfiler, EnvironmentType
+from drishti.preprocessing import PreprocessingPipeline
 from drishti.pipeline.role_registry import ImmutableRoleRegistry, RoleEnum
 from drishti.pipeline.specialist_crop import SpecialistHandCropAnalyzer
 from drishti.engine.observation import (
@@ -95,10 +97,6 @@ from drishti.engine.specialists import (
 )
 
 # Multi-HMR & SMPL-X for Stage 3 deep 3D analysis
-from utils import normalize_rgb, get_focalLength_from_fieldOfView
-from utils.camera import perspective_projection
-from model import Model
-import smplx
 
 PALETTE_BGR = [
     (0, 255, 128),    # Spring Green
@@ -122,6 +120,7 @@ SKELETON_PAIRS = [
 
 
 def get_camera_parameters(img_size: int, fov: float = 60.0, device: torch.device = torch.device('cuda:0')):
+    from utils import get_focalLength_from_fieldOfView
     K = torch.eye(3)
     focal = get_focalLength_from_fieldOfView(fov=fov, img_size=img_size)
     K[0, 0], K[1, 1] = focal, focal
@@ -130,6 +129,7 @@ def get_camera_parameters(img_size: int, fov: float = 60.0, device: torch.device
 
 
 def preprocess_frame_for_hmr(frame_bgr: np.ndarray, img_size: int, device: torch.device):
+    from utils import normalize_rgb
     h, w = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     img_pil = Image.fromarray(frame_rgb)
@@ -153,8 +153,30 @@ def run_unified_pipeline(
     sample_every: int = 2,
     max_frames: int = 0,
     prime_vram_gb: float = 2.2,
+    preprocessing_config: Optional[str] = None,
+    enable_preprocessing: bool = False,
+    profile: str = "legacy-experimental",
+    allow_experimental_models: bool = False,
+    experimental_options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
     """Executes the master unified pipeline adhering to docs/ARCHITECTURE.md."""
+    if profile == "video03-review":
+        if sample_every != 1:
+            raise ValueError("Video 3 review profile requires every frame; use --sample-every 1")
+        from drishti.release.unified_review import run_video03_review
+        return run_video03_review(video_source, output_dir, max_frames=max_frames,
+                                  allow_experimental_models=allow_experimental_models,
+                                  enable_preprocessing=enable_preprocessing,
+                                  preprocessing_config=preprocessing_config)
+    if profile == "video03-full-experimental":
+        if not allow_experimental_models:
+            raise ValueError("video03-full-experimental requires --allow-experimental-models")
+        from drishti.experimental.video03_full import run_video03_full_experimental
+        return run_video03_full_experimental(video_source, output_dir, max_frames=max_frames or 2200,
+                                              **(experimental_options or {}))
+    from model import Model
+    import smplx
+    video_source, max_frames = bounded_video_source(video_source, max_frames)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"[NETRA-4D Unified Pipeline] Executing on compute device: {device}")
 
@@ -171,8 +193,14 @@ def run_unified_pipeline(
     persistence_detector = PersistenceDetector()
     repetition_detector = RepetitionDetector(window_duration_sec=90.0, repetition_threshold=3)
     competing_hypothesis_engine = CompetingHypothesisEngine()
+    # Deep Preprocessing Pipeline
+    preprocessing_pipeline = PreprocessingPipeline(config=preprocessing_config)
+
     state_machines: Dict[str, CandidateStateMachine] = {}
-    specialist_crop_analyzer = SpecialistHandCropAnalyzer(crop_size=256)
+    specialist_crop_analyzer = SpecialistHandCropAnalyzer(
+        crop_size=256,
+        crop_enhancer=preprocessing_pipeline.enhance_crop,
+    )
     rtmpose_specialist = RTMPoseONNXRunner()
     mediapipe_specialist = MediaPipeHandRunner()
     escalation_gate = EscalationGate()
@@ -285,6 +313,7 @@ def run_unified_pipeline(
 
     active_spatial_tracks: Dict[int, Dict[str, Any]] = {}
     next_spatial_id = 1
+    last_flagged_save: Dict[str, int] = {}
 
     print(f"[NETRA-4D Unified Pipeline] Ingesting {width}x{height} | {total_frames} frames @ {fps:.2f} fps")
 
@@ -299,12 +328,15 @@ def run_unified_pipeline(
                     if frame_idx % sample_every == 0:
                         timestamp_sec = round(frame_idx / fps, 3)
 
+                        # Deep Preprocessing: Assess quality and conditionally enhance low-quality frames
+                        enhanced_frame, quality_report = preprocessing_pipeline.process(frame, frame_idx=frame_idx)
+
                         # -------------------------------------------------------------
                         # A. Continuous Vision Stream (Stage 1)
                         # High-resolution (imgsz=1280) pose inference with deterministic spatial tracking
                         # -------------------------------------------------------------
                         pose_res = yolo_pose.predict(
-                            frame,
+                            enhanced_frame,
                             imgsz=1280,
                             conf=0.15,
                             device=device,
@@ -351,7 +383,7 @@ def run_unified_pipeline(
                             for tid in expired:
                                 del active_spatial_tracks[tid]
 
-                        obj_res = yolo_obj.predict(frame, conf=0.20, device=device, verbose=False)[0]
+                        obj_res = yolo_obj.predict(enhanced_frame, conf=0.20, device=device, verbose=False)[0]
                         detected_objects: List[DetectedObjectObservation] = []
                         if obj_res.boxes is not None and len(obj_res.boxes) > 0:
                             for ob, oconf, ocls in zip(obj_res.boxes.xyxy.cpu().numpy(), obj_res.boxes.conf.cpu().numpy(), obj_res.boxes.cls.int().cpu().numpy()):
@@ -490,8 +522,9 @@ def run_unified_pipeline(
                                 bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
                                 cand_roi = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
                                 if cand_roi.size > 0:
+                                    cand_roi_enh = preprocessing_pipeline.enhance_crop(cand_roi)
                                     try:
-                                        p_res = yolo_phone.predict(cand_roi, verbose=False, conf=0.25)
+                                        p_res = yolo_phone.predict(cand_roi_enh, verbose=False, conf=0.25)
                                         for pr in p_res:
                                             for bx in pr.boxes:
                                                 if int(bx.cls.item()) == 1 and float(bx.conf.item()) >= 0.25:
@@ -508,8 +541,9 @@ def run_unified_pipeline(
                                 bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
                                 cand_roi = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
                                 if cand_roi.size > 0:
+                                    cand_roi_enh = preprocessing_pipeline.enhance_crop(cand_roi)
                                     try:
-                                        c_res = yolo_chit.predict(cand_roi, verbose=False, conf=0.25)
+                                        c_res = yolo_chit.predict(cand_roi_enh, verbose=False, conf=0.25)
                                         for cr in c_res:
                                             if len(cr.boxes) > 0:
                                                 chit_present = True
@@ -570,13 +604,14 @@ def run_unified_pipeline(
                                 # Stage 2 Specialist Crop Extraction
                                 bx_px = [int(v) for v in (obs.bbox_xyxy_norm[0]*width, obs.bbox_xyxy_norm[1]*height, obs.bbox_xyxy_norm[2]*width, obs.bbox_xyxy_norm[3]*height)]
                                 cand_crop = frame[max(0, bx_px[1]):min(height, bx_px[3]), max(0, bx_px[0]):min(width, bx_px[2])]
+                                cand_crop_enh = preprocessing_pipeline.enhance_crop(cand_crop) if cand_crop.size > 0 else cand_crop
                                 hand_crops = []
                                 if lw and rw:
                                     lw_n = (lw.x, lw.y)
                                     rw_n = (rw.x, rw.y)
                                     wrist_crops_meta = specialist_crop_analyzer.extract_wrist_crops(frame, lw_n, rw_n)
                                     if wrist_crops_meta:
-                                        hand_crops = [item[0] for item in wrist_crops_meta]
+                                        hand_crops = [preprocessing_pipeline.enhance_crop(item[0]) for item in wrist_crops_meta]
                                         for wcrop, wcenter, worigin in wrist_crops_meta:
                                             spec_res = specialist_crop_analyzer.analyze_crop(wcrop, wcenter, (worigin[0], worigin[1]))
                                             if spec_res.is_suspicious and spec_res.chit_bbox_xyxy:
@@ -594,7 +629,7 @@ def run_unified_pipeline(
                                 res2 = escalation_gate.evaluate_stage2_specialists(
                                     candidate_id=cand_id,
                                     evaluation=eval_result,
-                                    candidate_crop_bgr=cand_crop,
+                                    candidate_crop_bgr=cand_crop_enh,
                                     hand_crops_bgr=hand_crops
                                 )
                                 eval_result.suspicion_score = res2.resolved_suspicion
@@ -603,9 +638,9 @@ def run_unified_pipeline(
                                 eval_result.counter_evidence.extend(res2.counter_findings)
 
                                 # Stage 2 YOLO26m Cheating Detector Inference on Candidate Crop
-                                if yolo_cheating is not None and cand_crop.size > 0:
+                                if yolo_cheating is not None and cand_crop_enh.size > 0:
                                     try:
-                                        c_preds = yolo_cheating.predict(cand_crop, verbose=False, conf=0.25)
+                                        c_preds = yolo_cheating.predict(cand_crop_enh, verbose=False, conf=0.25)
                                         for cp in c_preds:
                                             for bx in cp.boxes:
                                                 cls_id = int(bx.cls.item())
@@ -626,9 +661,9 @@ def run_unified_pipeline(
                                         pass
 
                                 # Stage 2 Multi-Modal Exam Anomaly Specialist (chit-paper, hand-signs, head_movement, mobilephone)
-                                if yolo_multimodal is not None and cand_crop.size > 0:
+                                if yolo_multimodal is not None and cand_crop_enh.size > 0:
                                     try:
-                                        mm_preds = yolo_multimodal.predict(cand_crop, verbose=False, conf=0.25)
+                                        mm_preds = yolo_multimodal.predict(cand_crop_enh, verbose=False, conf=0.25)
                                         for mr in mm_preds:
                                             for mbx in mr.boxes:
                                                 m_cls = int(mbx.cls.item())
@@ -676,6 +711,24 @@ def run_unified_pipeline(
                                 else:
                                     active_alerts.append(f"{desk_lbl} [SUSPICIOUS]")
 
+                                if preprocessing_pipeline.config.save_flagged_frames and active_alerts:
+                                    alert_tag = active_alerts[-1].replace(" ", "_").replace("[", "").replace("]", "")
+                                    if frame_idx - last_flagged_save.get(alert_tag, -999) >= 15:
+                                        last_flagged_save[alert_tag] = frame_idx
+                                        preprocessing_pipeline.save_flagged_event_frame(
+                                            orig_bgr=frame,
+                                            enh_bgr=enhanced_frame,
+                                            frame_idx=frame_idx,
+                                            reason=alert_tag,
+                                            metadata={
+                                                "candidate_id": cand_id,
+                                                "state": candidate_state.value,
+                                                "suspicion_score": round(eval_result.suspicion_score, 4),
+                                                "timestamp_sec": timestamp_sec,
+                                                "quality_score": quality_report.overall_score,
+                                            }
+                                        )
+
                             # Record JSON audit
                             frame_audit_records.append({
                                 "candidate_id": cand_id,
@@ -722,6 +775,7 @@ def run_unified_pipeline(
                             "frame_idx": frame_idx,
                             "timestamp_sec": timestamp_sec,
                             "environment": env_profiler.environment_type.value,
+                            "quality_report": quality_report.to_dict() if hasattr(quality_report, "to_dict") else None,
                             "candidates_observed": frame_audit_records
                         })
 
@@ -752,9 +806,12 @@ def run_unified_pipeline(
             "environment_profile": env_profiler.get_summary(),
             "total_candidates_locked": len(candidate_state_manager.candidates),
             "total_sampled_frames": len(results),
+            "preprocessing_stats": preprocessing_pipeline.get_stats_summary(),
             "video_path": str(out_video_path),
             "frames": results
         }, f, indent=2)
+
+    print(f"  -> Preprocessing Stats: {preprocessing_pipeline.get_stats_summary()}")
 
     print(f"  -> JSON:  {out_file}")
     return out_video_path, out_file
@@ -766,7 +823,19 @@ if __name__ == "__main__":
     parser.add_argument("--assets", nargs="*", default=None, help="List of assets to process: VIDEO_01 VIDEO_02 ... or 'all'")
     parser.add_argument("--sample-every", type=int, default=1, help="Frame step interval (1 = all frames)")
     parser.add_argument("--max-frames", type=int, default=0, help="0 means full video")
-    parser.add_argument("--prime-vram-gb", type=float, default=2.2)
+    parser.add_argument("--prime-vram-gb", type=float, default=2.2, help="Legacy experimental profile only; review profile does not reserve scratch VRAM")
+    parser.add_argument("--preprocessing-config", default=None, help="Path to preprocessing YAML config")
+    parser.add_argument("--enable-preprocessing", action="store_true", help="Apply adaptive enhancement to inference only; raw evidence rendering is preserved")
+    parser.add_argument("--profile", choices=("video03-review", "video03-full-experimental", "legacy-experimental"), default="video03-review")
+    parser.add_argument("--allow-experimental-models", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=None, help="New directory for a single asset; existing directories are refused by review profile")
+    parser.add_argument("--evaluate-cvat", action="store_true", help="After inference, score explicit CVAT boxes and export unknown phone proposals for review")
+    parser.add_argument("--enable-rtmpose", action="store_true")
+    parser.add_argument("--enable-hands-experimental", action="store_true")
+    parser.add_argument("--enable-interaction-graph", action="store_true")
+    parser.add_argument("--enable-evidence-fusion", action="store_true")
+    parser.add_argument("--enable-3d-experimental", action="store_true")
+    parser.add_argument("--specialist-stride", type=int, default=1)
     args = parser.parse_args()
 
     manifest = load_drive_manifest(ROOT / "drishti4d" / "configs" / "datasets.json")
@@ -783,7 +852,14 @@ if __name__ == "__main__":
         else:
             target_ids = [args.asset]
     else:
-        target_ids = ["VIDEO_01"]
+        target_ids = ["VIDEO_03"] if args.profile in ("video03-review", "video03-full-experimental") else ["VIDEO_01"]
+
+    if args.profile in ("video03-review", "video03-full-experimental") and target_ids != ["VIDEO_03"]:
+        raise ValueError("Video 3 profiles are scoped to VIDEO_03 only")
+    if args.output_dir and len(target_ids) != 1:
+        raise ValueError("--output-dir requires a single asset")
+    if args.evaluate_cvat and args.profile != "video03-review":
+        raise ValueError("--evaluate-cvat is supported only for video03-review")
 
     print(f"[NETRA-4D] Target assets to process: {target_ids}")
     for asset_id in target_ids:
@@ -792,21 +868,37 @@ if __name__ == "__main__":
             print(f"Asset {asset_id} not found in manifest!")
             continue
 
-        out_dir = ROOT / "outputs" / "unified_pipeline" / asset_id
+        out_dir = args.output_dir or ROOT / "outputs" / "unified_pipeline" / (asset_id + "_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
         print(f"\n=======================================================")
         print(f"Streaming {asset.asset_id} ({asset.filename}) into Unified Pipeline...")
         print(f"=======================================================")
         try:
-            with materialize_drive_asset(asset, temp_root=out_dir / ".staging") as (video_path, prov):
+            with materialize_drive_asset(asset, temp_root=ROOT / "outputs" / ".unified_staging") as (video_path, prov):
                 run_unified_pipeline(
                     video_source=video_path,
                     output_dir=out_dir,
                     sample_every=args.sample_every,
                     max_frames=args.max_frames,
-                    prime_vram_gb=args.prime_vram_gb
+                    prime_vram_gb=args.prime_vram_gb,
+                    preprocessing_config=args.preprocessing_config,
+                    enable_preprocessing=args.enable_preprocessing,
+                    profile=args.profile,
+                    allow_experimental_models=args.allow_experimental_models,
+                    experimental_options={"enable_rtmpose":args.enable_rtmpose, "enable_hands":args.enable_hands_experimental,
+                                          "enable_interaction":args.enable_interaction_graph, "enable_fusion":args.enable_evidence_fusion,
+                                          "enable_3d":args.enable_3d_experimental, "specialist_stride":args.specialist_stride},
                 )
+                if args.evaluate_cvat:
+                    import subprocess
+                    subprocess.run([sys.executable, str(ROOT / "scripts/evaluate_cvat_boxes.py"),
+                        "--labels", str(ROOT / "outputs/video03_cvat_experiment/dataset/trusted_boxes.jsonl"),
+                        "--predictions", str(out_dir / "detections.jsonl"),
+                        "--output", str(out_dir / "metrics.json"), "--max-frames", "2200"], check=True)
+                    subprocess.run([sys.executable, str(ROOT / "scripts/export_phone_review_queue.py"),
+                        "--run", str(out_dir), "--labels",
+                        str(ROOT / "outputs/video03_cvat_experiment/dataset/trusted_boxes.jsonl")], check=True)
         except Exception as e:
             print(f"[ERROR] Exception processing {asset_id}: {e}")
             import traceback
             traceback.print_exc()
-
+            raise SystemExit(1)
