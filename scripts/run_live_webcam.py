@@ -13,6 +13,7 @@ import queue
 import sys
 import threading
 from time import monotonic, perf_counter, sleep
+from types import SimpleNamespace
 from uuid import uuid4
 
 import cv2
@@ -30,6 +31,7 @@ from drishti.cbt import AutomaticCBTBehaviouralEngine, CBTBehaviouralReasoner, d
 from drishti.events import EvidenceKind, EventLifecycle, EventRecord, SpecialistStatus
 from drishti.privacy import apply_privacy_mask_and_collect_annotations, draw_post_blur_candidate_annotations
 from drishti.preprocessing import PreprocessingPipeline
+from drishti.render.evidence_renderer import COCO_KEYPOINT_NAMES, EvidenceRenderer
 from drishti.providers.object_provider import ObjectDisambiguationProvider
 from drishti.providers.yolo26_provider import YOLO26PoseProvider
 from drishti.temporal import BaselineTemporalEngine, draw_temporal_review_events
@@ -185,6 +187,63 @@ def publish_atomic(path: Path, payload: bytes) -> bool:
     return False
 
 
+class _EvidenceObservation:
+    """Adapter from canonical observations to the established evidence renderer."""
+
+    def __init__(self, person):
+        self.bbox_xyxy_norm = person.bbox_xyxy_norm
+        self.keypoints = person.keypoints_2d
+
+    def get_keypoint(self, name: str):
+        return self.keypoints.get(name)
+
+
+def render_evidence_review_frame(renderer, frame, people, detected, privacy, events, reasoner, *, frame_index, fps):
+    """Single, semantic live renderer; no raw furniture/debug-layer stacking."""
+    review_ids = {candidate_id for event in events for candidate_id in event.candidate_ids}
+    privacy_by_id = {int(person.entity_local_id): annotation for person, annotation in zip(people, privacy)}
+    bindings = getattr(reasoner, "last_bindings", {}) if reasoner else {}
+    candidates = {}
+    tracked_people = []
+    for person in people:
+        candidate_id = int(person.entity_local_id)
+        annotation = privacy_by_id.get(candidate_id)
+        binding = bindings.get(candidate_id)
+        candidates[f"Candidate_{candidate_id}"] = SimpleNamespace(
+            is_visible=True,
+            is_occluded=False,
+            current_observation=_EvidenceObservation(person),
+            behavioural_state="REVIEW" if candidate_id in review_ids else "NORMAL",
+            gaze_direction=getattr(annotation, "gaze_proxy", "UNKNOWN"),
+            is_peeking_neighbour=any("NEIGHBOUR" in event.event_type and candidate_id in event.candidate_ids for event in events),
+            neighbour_candidate=None,
+            identity=SimpleNamespace(workstation_id=getattr(binding, "workstation_id", None)),
+        )
+        keypoints = []
+        height, width = frame.shape[:2]
+        for name in COCO_KEYPOINT_NAMES:
+            point = person.keypoints_2d.get(name)
+            keypoints.append([
+                (point.x * width) if point else 0.0,
+                (point.y * height) if point else 0.0,
+                point.confidence if point else 0.0,
+            ])
+        tracked_people.append({"bbox": person.bbox_xyxy_px, "keypoints": keypoints})
+    evidence_objects = [
+        SimpleNamespace(
+            class_name=str(item.metadata.get("raw_model_class", item.object_class.value)),
+            confidence=item.confidence,
+            bbox_xyxy_norm=item.bbox_xyxy_norm,
+        )
+        for item in detected
+    ]
+    alerts = [event.label for event in events[:2]]
+    return renderer.render_frame(
+        frame, tracked_people, candidates, evidence_objects, set(), "LIVE REVIEW",
+        frame_index, 0, fps, alerts,
+    )
+
+
 def write_clip(
     path: Path, frames: list[np.ndarray], fps: float, ended_at_sec: float,
     record: EventRecord, repository: EventRepository,
@@ -234,6 +293,7 @@ def main() -> int:
     parser.add_argument("--interaction-max-distance", type=float, default=0.42)
     parser.add_argument("--screen-max-distance", type=float, default=0.55)
     parser.add_argument("--gaze-min-confidence", type=float, default=0.35)
+    parser.add_argument("--render-profile", choices=("evidence_review", "context_debug"), default="evidence_review", help="evidence_review is the clean operator frame; context_debug preserves the historical diagnostic stack.")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--maximum-frames", type=int, default=0)
@@ -276,6 +336,7 @@ def main() -> int:
     pose.start()
     objects.start()
     preprocessing = PreprocessingPipeline(config=args.preprocessing_config)
+    evidence_renderer = EvidenceRenderer(enable_face_blur=True, min_keypoint_conf=0.20)
     provenance = {
         "pose": model_record(pose_path),
         "object": model_record(object_path),
@@ -348,16 +409,22 @@ def main() -> int:
             _, detected = objects.process_frame(packet.index, timestamp, enhanced_frame, args.camera_id, run_id, people)
             masked, privacy = apply_privacy_mask_and_collect_annotations(packet.frame, people)
             events = temporal.update(timestamp, people, detected, privacy)
-            annotated = draw_verified_overlay(masked, people, detected)
-            annotated = draw_post_blur_candidate_annotations(annotated, people, privacy)
             active_cbt = (
                 temporal.active_reasoner
                 if isinstance(temporal, AutomaticCBTBehaviouralEngine)
                 else temporal if isinstance(temporal, CBTBehaviouralReasoner) else None
             )
-            if active_cbt:
-                annotated = draw_cbt_context(annotated, active_cbt, timestamp_sec=timestamp)
-            annotated = draw_temporal_review_events(annotated, people, events)
+            if args.render_profile == "context_debug":
+                annotated = draw_verified_overlay(masked, people, detected)
+                annotated = draw_post_blur_candidate_annotations(annotated, people, privacy)
+                if active_cbt:
+                    annotated = draw_cbt_context(annotated, active_cbt, timestamp_sec=timestamp)
+                annotated = draw_temporal_review_events(annotated, people, events)
+            else:
+                annotated = render_evidence_review_frame(
+                    evidence_renderer, packet.frame, people, detected, privacy, events, active_cbt,
+                    frame_index=packet.index, fps=fps,
+                )
             if events and preprocessing.config.save_flagged_frames:
                 event_tags = "_".join(str(getattr(e, "event_type", "EVENT")) for e in events[:2])
                 clean_tag = "".join(c if c.isalnum() or c == "_" else "_" for c in event_tags)[:40]

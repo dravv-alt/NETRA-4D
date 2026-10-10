@@ -232,15 +232,10 @@ def _draw_face_mask(person_mask: np.ndarray, geom: _FaceGeometry, leye: Point | 
     fc_x, fc_y = geom.center
     cv2.ellipse(person_mask, (int(fc_x), int(fc_y)), (geom.axis_x, geom.axis_y), geom.angle_deg, 0, 360, 255, -1)
 
-    # --- Preserve eyes for gaze tracking (whatever eye(s) are visible) ---
-    eye_radius = int(max(3.0, eye_dist_hint * 0.32))
-    if leye is not None:
-        cv2.circle(person_mask, (int(leye[0]), int(leye[1])), eye_radius, 0, -1)
-    if reye is not None:
-        cv2.circle(person_mask, (int(reye[0]), int(reye[1])), eye_radius, 0, -1)
-    if leye is not None and reye is not None:
-        mid_eye = (int((leye[0] + reye[0]) / 2.0), int((leye[1] + reye[1]) / 2.0))
-        cv2.ellipse(person_mask, mid_eye, (int(eye_dist_hint * 0.55), int(eye_radius * 0.75)), geom.angle_deg, 0, 360, 0, -1)
+    # The rendered privacy boundary covers the complete face, including the
+    # eyes.  Geometric gaze-proxy features are collected before this function
+    # is called; exposing the eyes in the published frame is neither necessary
+    # nor acceptable for privacy.
 
     # --- Preserve neck: strictly exclude neck/collar region ---
     if lsh is not None and rsh is not None:

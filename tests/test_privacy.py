@@ -4,6 +4,7 @@ import numpy as np
 
 from drishti.privacy import (
     apply_privacy_mask_and_collect_annotations,
+    build_adaptive_face_mask,
     gaze_proxy_from_pose,
 )
 
@@ -30,6 +31,17 @@ def test_gaze_proxy_is_based_on_pose_geometry_not_a_guess():
     direction, confidence = gaze_proxy_from_pose(candidate, 100, 100)
     assert direction == "RIGHT"
     assert confidence == 0.9
+
+
+def test_privacy_mask_covers_detected_eye_region():
+    candidate = person({
+        "left_eye": point(0.30, 0.20),
+        "right_eye": point(0.50, 0.20),
+        "nose": point(0.40, 0.25),
+    })
+    mask = build_adaptive_face_mask(100, 100, [candidate])
+    assert mask[20, 30] > 0
+    assert mask[20, 50] > 0
 
 
 def test_missing_facial_keypoints_blurs_head_but_marks_gaze_unknown():
