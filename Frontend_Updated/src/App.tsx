@@ -201,13 +201,18 @@ export const App: React.FC = () => {
       )}
 
       {/* 2. LIVE MONITOR */}
-      {activeTab === 'live-monitor' && (
+      {/* Keep the monitor mounted across navigation: its stream, WebSocket, and
+          in-memory review context must not be reset merely by changing tabs. */}
+      <div
+        hidden={activeTab !== 'live-monitor'}
+        aria-hidden={activeTab !== 'live-monitor'}
+      >
         <LiveMonitorView
           cameras={CAMERA_FEEDS}
           onReviewEvent={handleReviewEvent}
           events={events}
         />
-      )}
+      </div>
 
       {/* 3. EVENT QUEUE (TRIAGE) */}
       {activeTab === 'event-queue' && (
