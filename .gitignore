@@ -63,4 +63,9 @@ scratch_eval/
 scratch_diag.py
 .system_generated/
 
+# Imported architecture-tool checkouts and local packaging metadata
+.archify/
+tools/archify/
+src/*.egg-info/
+
 
